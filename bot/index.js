@@ -69,6 +69,31 @@ const commands = {
 		const halfStar = '½';
 		const starsDisplay = firstArg % 1 === 0 ? star : star + halfStar;
 
+		const data = {
+			channelUsername: channel.replace('#', ''),
+			userId: tags['user-id'],
+			username: tags['display-name'] || tags.username,
+			stars: firstArg
+		};
+
+		try {
+			const response = await fetch(`${API_URL}/star/submit`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(data)
+			});
+			if (!response.ok) {
+				const errorResponse = await response.json();
+				console.log(JSON.stringify(errorResponse));
+				client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al enviar tu calificación.`);
+				return;
+			}
+		} catch (error) {
+			console.log(error);
+			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al enviar tu calificación.`);
+			return;
+		}
+
 		client.say(channel, `${tags['display-name'] || tags.username} le ha puesto ${starsDisplay} estrellas a la peli!`);
 	},
 	'!setmovie': async (channel, tags, message, args) => {
