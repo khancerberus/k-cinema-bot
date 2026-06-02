@@ -5,15 +5,15 @@ const API_URL = process.env.API_URL;
 
 const MAX_CHAT_MESSAGE_LENGTH = 450;
 
-const JELLYFIN_URL = 'http://10.10.0.5:8096'; 
-const API_KEY = '1d15cf238e0742ca9a3cd8c303602cee';
+const JELLYFIN_URL = process.env.JELLYFIN_URL; 
+const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY;
 
 async function obtenerEstadoPeliActual(nombreUsuario) {
   try {
     const respuesta = await fetch(`${JELLYFIN_URL}/Sessions`, {
       method: 'GET',
       headers: {
-        'Authorization': `MediaBrowser Token=${API_KEY}`,
+        'Authorization': `MediaBrowser Token=${JELLYFIN_API_KEY}`,
         'Content-Type': 'application/json'
       }
     });
