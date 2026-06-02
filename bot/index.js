@@ -5,6 +5,59 @@ const API_URL = process.env.API_URL;
 
 const MAX_CHAT_MESSAGE_LENGTH = 450;
 
+const JELLYFIN_URL = 'http://10.10.0.5:8096'; 
+const API_KEY = '1d15cf238e0742ca9a3cd8c303602cee';
+
+async function obtenerEstadoPeliActual(nombreUsuario) {
+  try {
+    const respuesta = await fetch(`${JELLYFIN_URL}/Sessions`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `MediaBrowser Token=${API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!respuesta.ok) {
+      throw new Error(`Error HTTP: ${respuesta.status}`);
+    }
+
+    const sesiones = await respuesta.json();
+    const sesion = sesiones.find(s => s.UserName === nombreUsuario);
+
+		// Verificamos si hay una sesión activa y contenido en reproducción
+    if (!sesion || !sesion.NowPlayingItem || sesion.PlayState.PositionTicks === undefined) {
+			return 'No estamos viendo nada en este momento.';
+    }
+
+		if (sesion.NowPlayingItem.Type !== 'Movie') {
+			return 'Ahora mismo estamos viendo algo, pero no es una pelicula.';
+		}
+
+    // Convertir Ticks a Segundos (1 segundo = 10,000,000 Ticks)
+    const ticks = sesion.PlayState.PositionTicks;
+    const segundosTotales = Math.floor(ticks / 10000000);
+
+    // Calcular horas, minutos y segundos
+    const horas = Math.floor(segundosTotales / 3600);
+    const minutos = Math.floor((segundosTotales % 3600) / 60);
+    const segundos = segundosTotales % 60;
+
+    // Formatear como 01:30:23
+    const formatoReloj = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
+
+    const nombrePelicula = sesion.NowPlayingItem.Name;
+		const anioPelicula = sesion.NowPlayingItem.ProductionYear;
+		const anioFormateado = anioPelicula ? ` (${anioPelicula})` : '';
+
+		return `🍿Viendo: ${nombrePelicula}${anioFormateado} | ⏱️Tiempo: ${formatoReloj}`;
+
+  } catch (error) {
+    console.error('Error obteniendo datos de Jellyfin:', error);
+    return 'Hubo un problema al conectar con el servidor de Jellyfin.';
+  }
+}
+
 function clampChatMessage(message) {
 	if (typeof message !== 'string') {
 		return 'Respuesta no valida de la API.';
@@ -177,5 +230,9 @@ const commands = {
 			console.log(error);
 			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al actualizar la película.`);
 		}
+	},
+	'!peli': async (channel) => {
+		const estadoPeli = await obtenerEstadoPeliActual('Victor');
+		client.say(channel, clampChatMessage(estadoPeli));
 	}
 }
