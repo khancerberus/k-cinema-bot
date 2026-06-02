@@ -8,7 +8,7 @@ import { APP_FILTER } from '@nestjs/core';
 import { StarModule } from './star/star.module';
 import { TmdbModule } from './tmdb/tmdb.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { CurrentMovie } from './current-movie.model';
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
@@ -32,10 +32,10 @@ import { CurrentMovie } from './current-movie.model';
         },
       }),
     }),
-    SequelizeModule.forFeature([CurrentMovie]),
     RecommendationModule,
     StarModule,
     TmdbModule,
+    UserModule,
   ],
   controllers: [AppController],
   providers: [
