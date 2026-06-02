@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { CurrentMovie } from './current-movie.model';
 import { TmdbService } from '@/tmdb/tmdb.service';
@@ -44,7 +44,7 @@ export class CurrentMovieService {
     });
 
     if (!currentMovie) {
-      throw new Error(
+      throw new NotFoundException(
         `No se encontró una película actual para el canal ${channelUsername}.`,
       );
     }
@@ -52,7 +52,7 @@ export class CurrentMovieService {
     const movie = await this.tmdbService.getMovie(currentMovie.tmdbId);
 
     if (!movie) {
-      throw new Error(
+      throw new NotFoundException(
         `La película con TMDB ID ${currentMovie.tmdbId} no se encontró.`,
       );
     }

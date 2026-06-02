@@ -1,4 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  NotImplementedException,
+  Post,
+} from '@nestjs/common';
 import { RecommendationService } from './recommendation.service';
 import type { RecommendationBody } from './recommendation.interface';
 import { extractTmdbId } from '@/utils/url-decoder.utils';
@@ -10,7 +16,7 @@ export class RecommendationController {
   @Post()
   createRecommendation(@Body() recommendation: RecommendationBody) {
     if (!recommendation.userId || !recommendation.movieOrTmdbId) {
-      throw new Error('Invalid recommendation data');
+      throw new BadRequestException('Invalid recommendation data');
     }
 
     // Can be either a TMDB ID (number), TMDB URL, or "movie (year)" format
@@ -21,7 +27,7 @@ export class RecommendationController {
       ) && // Not a TMDB URL
       !/.+\s\(\d{4}\)/.test(recommendation.movieOrTmdbId) // Not "movie (year)" format
     ) {
-      throw new Error('Invalid movieOrTmdbId format');
+      throw new BadRequestException('Invalid movieOrTmdbId format');
     }
 
     let tmdbId = null;
@@ -35,7 +41,7 @@ export class RecommendationController {
       tmdbId = extractTmdbId(recommendation.movieOrTmdbId);
 
       if (!tmdbId) {
-        throw new Error('Could not extract TMDB ID from URL');
+        throw new BadRequestException('Could not extract TMDB ID from URL');
       }
     }
 
@@ -45,7 +51,7 @@ export class RecommendationController {
 
     // movie (year) format manage
     if (!tmdbId && /.+\s\(\d{4}\)$/.test(recommendation.movieOrTmdbId)) {
-      throw new Error('Error not yet implemented');
+      throw new NotImplementedException('Error not yet implemented');
 
       // const match = recommendation.movieOrTmdbId.match(/(.+)\s\((\d{4})\)$/);
       // if (match) {
@@ -83,7 +89,7 @@ export class RecommendationController {
     }
 
     if (!tmdbId) {
-      throw new Error('Could not determine TMDB ID from input');
+      throw new BadRequestException('Could not determine TMDB ID from input');
     }
 
     return this.recommendationService.createOne({

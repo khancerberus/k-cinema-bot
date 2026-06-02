@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { CreateStarDto, SubmitStarDto } from './star.dto';
 import { UserService } from '@/user/user.service';
 import { CurrentMovieService } from './current-movie.service';
@@ -58,8 +58,8 @@ export class StarService {
     });
 
     if (existingStar) {
-      throw new Error(
-        `Usuario ${submitStarDto.username} ya ha dado estrellas a "${currentMovie.title} (${currentMovie.releaseYear})" hoy. Solo se permite una valoración por película al día.`,
+      throw new BadRequestException(
+        `${submitStarDto.username} ya ha dado ${existingStar.score} estrellas a "${currentMovie.title} (${currentMovie.releaseYear})" hoy. Solo se permite una valoración por película al día.`,
       );
     }
 
@@ -69,8 +69,12 @@ export class StarService {
       score: submitStarDto.stars,
     });
 
+    const fullStars = Math.floor(submitStarDto.stars);
+    const hasHalfStar = submitStarDto.stars % 1 !== 0;
+    const starsAsEmotes = `${'⭐'.repeat(fullStars)}${hasHalfStar ? '½' : ''}`;
+
     return {
-      message: `Usuario ${submitStarDto.username} ha dado ${submitStarDto.stars} estrellas a "${currentMovie.title} (${currentMovie.releaseYear})"`,
+      message: `${submitStarDto.username} ha dado ${starsAsEmotes} (${submitStarDto.stars}) estrellas a "${currentMovie.title} (${currentMovie.releaseYear})"`,
       currentMovie,
       stars: submitStarDto.stars,
     };

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable } from '@nestjs/common';
 import { Recommendation } from './recommendation.model';
 import { InjectModel } from '@nestjs/sequelize';
 import { CreateRecommendation } from './recommendation.interface';
@@ -19,7 +19,7 @@ export class RecommendationService {
     const isAdded = await this.tmdbService.addMovieToList(tmdbId, 8655050);
 
     if (!isAdded) {
-      throw new Error(
+      throw new BadGatewayException(
         `Failed to add movie with TMDB ID ${tmdbId} to the recommendation list.`,
       );
     }

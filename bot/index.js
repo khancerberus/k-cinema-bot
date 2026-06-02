@@ -3,6 +3,67 @@ import 'dotenv/config';
 
 const API_URL = process.env.API_URL;
 
+const MAX_CHAT_MESSAGE_LENGTH = 450;
+
+function clampChatMessage(message) {
+	if (typeof message !== 'string') {
+		return 'Respuesta no valida de la API.';
+	}
+
+	if (message.length <= MAX_CHAT_MESSAGE_LENGTH) {
+		return message;
+	}
+
+	return `${message.slice(0, MAX_CHAT_MESSAGE_LENGTH - 3)}...`;
+}
+
+function extractApiMessage(rawBody) {
+	if (!rawBody || !rawBody.trim()) {
+		return null;
+	}
+
+	try {
+		const parsedBody = JSON.parse(rawBody);
+
+		if (typeof parsedBody === 'string' && parsedBody.trim()) {
+			return parsedBody;
+		}
+
+		if (Array.isArray(parsedBody?.message)) {
+			return parsedBody.message.join(', ');
+		}
+
+		if (typeof parsedBody?.message === 'string' && parsedBody.message.trim()) {
+			return parsedBody.message;
+		}
+
+		if (typeof parsedBody?.error === 'string' && parsedBody.error.trim()) {
+			return parsedBody.error;
+		}
+
+		return JSON.stringify(parsedBody);
+	} catch {
+		return rawBody;
+	}
+}
+
+async function sendApiResponseToChat({ channel, response, fallbackMessage }) {
+	const rawBody = await response.text();
+	const apiMessage = extractApiMessage(rawBody);
+
+	if (apiMessage) {
+		client.say(channel, clampChatMessage(apiMessage));
+		return;
+	}
+
+	if (fallbackMessage) {
+		client.say(channel, fallbackMessage);
+		return;
+	}
+
+	client.say(channel, `Error ${response.status}: ${response.statusText}`);
+}
+
 const client = new tmi.Client({
 	options: { debug: true },
 	identity: {
@@ -24,7 +85,7 @@ client.on('message', (channel, tags, message, self) => {
 
 const commands = {
 	'!rec': async (channel, tags, message, args) => {
-		if (!args) {
+		if (!args.length) {
 			client.say(channel, `@${tags['display-name'] || tags.username}, !rec <nombre pelicula> (<año>) | !rec <id de TMDB>`);
 			return;
 		}
@@ -42,18 +103,12 @@ const commands = {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(data)
 			});
-			if (response.ok) {
-				client.say(channel, `Gracias por la recomendación, ${displayName}!`);
-			} else {
-				const errorResponse = await response.json();
-				console.log(JSON.stringify(errorResponse));
-				if (errorResponse.error === 'DuplicatedRecommendation') {
-					client.say(channel, `Disculpa ${displayName}, ya han recomendado esa película antes.`);
-					return;
-				}
-				console.error(`Error response from API: ${response.status} ${response.statusText}`);
-				client.say(channel, `${displayName}, asegurate de que el enlace sea correcto y vuelva a intentarlo.`);
-			}
+
+			await sendApiResponseToChat({
+				channel,
+				response,
+				fallbackMessage: `${displayName}, asegurate de que el enlace sea correcto y vuelva a intentarlo.`
+			});
 		} catch (error) {
 			client.say(channel, `Disculpa ${displayName}, hubo un error al procesar tu recomendación.`);
 		}
@@ -64,10 +119,6 @@ const commands = {
 			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, por favor proporciona un número del 0.5 al 5 y sus intermedios.`);
 			return;
 		}
-
-		const star = '⭐'.repeat(firstArg);
-		const halfStar = '½';
-		const starsDisplay = firstArg % 1 === 0 ? star : star + halfStar;
 
 		const data = {
 			channelUsername: channel.replace('#', ''),
@@ -82,22 +133,20 @@ const commands = {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(data)
 			});
-			if (!response.ok) {
-				const errorResponse = await response.json();
-				console.log(JSON.stringify(errorResponse));
-				client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al enviar tu calificación.`);
-				return;
-			}
+
+			await sendApiResponseToChat({
+				channel,
+				response,
+				fallbackMessage: `Disculpa ${tags['display-name'] || tags.username}, hubo un error al enviar tu calificación.`
+			});
 		} catch (error) {
 			console.log(error);
 			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al enviar tu calificación.`);
 			return;
 		}
-
-		client.say(channel, `${tags['display-name'] || tags.username} le ha puesto ${starsDisplay} estrellas a la peli!`);
 	},
 	'!setmovie': async (channel, tags, message, args) => {
-		if (!args) {
+		if (!args.length) {
 			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, por favor proporciona la url de tmdb de la película.`);
 			return;
 		}
@@ -113,19 +162,17 @@ const commands = {
 		}
 
 		try {
-			const response = await fetch(`${API_URL}/set-movie`, {
+			const response = await fetch(`${API_URL}/current-movie/set`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(data)
 			});
-			const message = await response.text();
-			if (response.ok) {
-				client.say(channel, message);
-			} else {
-				const errorResponse = await response.json();
-				console.log(JSON.stringify(errorResponse));
-				client.say(channel, message);
-			}
+
+			await sendApiResponseToChat({
+				channel,
+				response,
+				fallbackMessage: `Disculpa ${tags['display-name'] || tags.username}, hubo un error al actualizar la película.`
+			});
 		} catch (error) {
 			console.log(error);
 			client.say(channel, `Disculpa ${tags['display-name'] || tags.username}, hubo un error al actualizar la película.`);
