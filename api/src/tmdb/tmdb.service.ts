@@ -18,7 +18,7 @@ export class TmdbService {
 
     try {
       const response = await this.httpService.axiosRef.get<Movie>(
-        `https://api.themoviedb.org/3/movie/${tmdbId}`,
+        `https://api.themoviedb.org/3/movie/${tmdbId}?append_to_response=credits&language=es-ES`,
         config,
       );
 
@@ -40,7 +40,7 @@ export class TmdbService {
 
     try {
       const response = await this.httpService.axiosRef.get<TvShow>(
-        `https://api.themoviedb.org/3/tv/${tmdbId}`,
+        `https://api.themoviedb.org/3/tv/${tmdbId}?append_to_response=credits`,
         config,
       );
 
