@@ -67,9 +67,10 @@ export class StarService {
           title: movieDetail?.title || 'Unknown',
           year: movieDetail?.release_date.split('-')[0] || 'Unknown',
           director:
-            movieDetail?.credits.crew.find(
-              (member) => member.job === 'Director',
-            )?.name || 'Unknown',
+            movieDetail?.credits.crew
+              .filter((member) => member.job === 'Director')
+              .map((director) => director.name)
+              .join(', ') || 'Unknown',
           rating: roundedAverageRating,
           synopsis: movieDetail?.overview || 'No synopsis available',
           lastWatched: lastWatchedAt
