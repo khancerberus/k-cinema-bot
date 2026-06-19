@@ -1,7 +1,10 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
+import { AxiosError } from 'axios';
 import { Movie } from './movie.interface';
 import { TvShow } from './serie.interface';
+
+export type AddMovieToListResult = 'added' | 'already_exists' | 'failed';
 
 @Injectable()
 export class TmdbService {
@@ -18,7 +21,7 @@ export class TmdbService {
 
     try {
       const response = await this.httpService.axiosRef.get<Movie>(
-        `https://api.themoviedb.org/3/movie/${tmdbId}?append_to_response=credits&language=es-ES`,
+        `https://api.themoviedb.org/3/movie/${tmdbId}?append_to_response=credits&language=es-MX`,
         config,
       );
 
@@ -40,7 +43,7 @@ export class TmdbService {
 
     try {
       const response = await this.httpService.axiosRef.get<TvShow>(
-        `https://api.themoviedb.org/3/tv/${tmdbId}?append_to_response=credits`,
+        `https://api.themoviedb.org/3/tv/${tmdbId}?append_to_response=credits&language=es-MX`,
         config,
       );
 
@@ -80,7 +83,10 @@ export class TmdbService {
     }
   }
 
-  async addMovieToList(tmdbId: number, listId: number): Promise<boolean> {
+  async addMovieToList(
+    tmdbId: number,
+    listId: number,
+  ): Promise<AddMovieToListResult> {
     const config = {
       headers: {
         Authorization: `Bearer ${process.env.TMDB_TOKEN}`,
@@ -98,12 +104,35 @@ export class TmdbService {
         JSON.stringify({ media_id: tmdbId }),
         config,
       );
-      return response.data.success === true;
+
+      if (response.data.success === true) {
+        return 'added';
+      }
+
+      if (response.data.status_code === 8) {
+        return 'already_exists';
+      }
+
+      return 'failed';
     } catch (error: unknown) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const responseData = error.response.data as {
+          status_code?: number;
+          status_message?: string;
+        };
+
+        if (responseData.status_code === 8) {
+          this.logger.warn(
+            `Movie with TMDB ID ${tmdbId} is already in TMDB list ${listId}.`,
+          );
+          return 'already_exists';
+        }
+      }
+
       this.logger.error(
         `Failed to add movie with TMDB ID ${tmdbId} to list ${listId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
-      return false;
+      return 'failed';
     }
   }
 }

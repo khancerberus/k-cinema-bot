@@ -63,4 +63,16 @@ export class CurrentMovieService {
       releaseYear: movie.release_date.split('-')[0],
     };
   }
+
+  async clearCurrentMovie(channelUsername: string): Promise<string> {
+    const deletedCount = await this.currentMovieModel.destroy({
+      where: { channelUsername },
+    });
+
+    if (deletedCount === 0) {
+      return `No se encontró una película actual para el canal ${channelUsername}.`;
+    }
+
+    return `La película actual para el canal ${channelUsername} ha sido eliminada.`;
+  }
 }

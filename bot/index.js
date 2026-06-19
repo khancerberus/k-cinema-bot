@@ -30,10 +30,6 @@ async function obtenerEstadoPeliActual(nombreUsuario) {
 			return 'No estamos viendo nada en este momento.';
     }
 
-		if (sesion.NowPlayingItem.Type !== 'Movie') {
-			return 'Ahora mismo estamos viendo algo, pero no es una pelicula.';
-		}
-
     // Convertir Ticks a Segundos (1 segundo = 10,000,000 Ticks)
     const ticks = sesion.PlayState.PositionTicks;
     const segundosTotales = Math.floor(ticks / 10000000);
@@ -46,11 +42,30 @@ async function obtenerEstadoPeliActual(nombreUsuario) {
     // Formatear como 01:30:23
     const formatoReloj = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
 
-    const nombrePelicula = sesion.NowPlayingItem.Name;
-		const anioPelicula = sesion.NowPlayingItem.ProductionYear;
-		const anioFormateado = anioPelicula ? ` (${anioPelicula})` : '';
+    const nowPlaying = sesion.NowPlayingItem;
 
-		return `🍿Viendo: ${nombrePelicula}${anioFormateado} | ⏱️Tiempo: ${formatoReloj}`;
+		if (nowPlaying.Type === 'Movie') {
+			const nombrePelicula = nowPlaying.Name;
+			const anioPelicula = nowPlaying.ProductionYear;
+			const anioFormateado = anioPelicula ? ` (${anioPelicula})` : '';
+
+			return `🍿Viendo: ${nombrePelicula}${anioFormateado} | ⏱️Tiempo: ${formatoReloj}`;
+		}
+
+		if (nowPlaying.Type === 'Episode') {
+			const nombreSerie = nowPlaying.SeriesName || 'Serie desconocida';
+			const nombreEpisodio = nowPlaying.Name || 'Episodio sin titulo';
+			const temporada = Number.isInteger(nowPlaying.ParentIndexNumber)
+				? String(nowPlaying.ParentIndexNumber).padStart(2, '0')
+				: '??';
+			const episodio = Number.isInteger(nowPlaying.IndexNumber)
+				? String(nowPlaying.IndexNumber).padStart(2, '0')
+				: '??';
+
+			return `📺Viendo: ${nombreSerie} | S${temporada}E${episodio} - ${nombreEpisodio} | ⏱️Tiempo: ${formatoReloj}`;
+		}
+
+		return 'Ahora mismo estamos viendo algo, pero no es una pelicula ni un episodio de serie.';
 
   } catch (error) {
     console.error('Error obteniendo datos de Jellyfin:', error);

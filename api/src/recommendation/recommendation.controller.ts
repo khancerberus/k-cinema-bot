@@ -8,13 +8,17 @@ import {
 import { RecommendationService } from './recommendation.service';
 import type { RecommendationBody } from './recommendation.interface';
 import { extractTmdbId } from '@/utils/url-decoder.utils';
+import { TmdbService } from '@/tmdb/tmdb.service';
 
 @Controller('recommendation')
 export class RecommendationController {
-  constructor(private readonly recommendationService: RecommendationService) {}
+  constructor(
+    private readonly recommendationService: RecommendationService,
+    private readonly tmdbService: TmdbService,
+  ) {}
 
   @Post()
-  createRecommendation(@Body() recommendation: RecommendationBody) {
+  async createRecommendation(@Body() recommendation: RecommendationBody) {
     if (!recommendation.userId || !recommendation.movieOrTmdbId) {
       throw new BadRequestException('Invalid recommendation data');
     }
@@ -92,10 +96,24 @@ export class RecommendationController {
       throw new BadRequestException('Could not determine TMDB ID from input');
     }
 
-    return this.recommendationService.createOne({
+    const recommendationResult = await this.recommendationService.createOne({
       userId: recommendation.userId,
       username: recommendation.username,
       tmdbId,
     });
+
+    if (!recommendationResult) {
+      throw new BadRequestException('Failed to create recommendation');
+    }
+
+    const movie = await this.tmdbService.getMovie(tmdbId);
+
+    if (!movie) {
+      throw new BadRequestException(
+        'No pude traer los datos de la película recomendada, pero gracias por tu recomendación!',
+      );
+    }
+
+    return `@${recommendation.username}, gracias por tu recomendación de ${movie.title} (${movie.release_date?.split('-')[0] || 'N/A'}). ¡La tendremos en cuenta para futuras proyecciones!`;
   }
 }

@@ -16,9 +16,13 @@ export class RecommendationService {
   async createOne(recommendation: CreateRecommendation) {
     const { tmdbId } = recommendation;
 
-    const isAdded = await this.tmdbService.addMovieToList(tmdbId, 8655050);
+    const addResult = await this.tmdbService.addMovieToList(tmdbId, 8655050);
 
-    if (!isAdded) {
+    if (addResult === 'already_exists') {
+      throw new DuplicatedRecommendationException(recommendation.username);
+    }
+
+    if (addResult === 'failed') {
       throw new BadGatewayException(
         `Failed to add movie with TMDB ID ${tmdbId} to the recommendation list.`,
       );
@@ -33,7 +37,7 @@ export class RecommendationService {
         error instanceof Error &&
         error.name === 'SequelizeUniqueConstraintError'
       ) {
-        throw new DuplicatedRecommendationException();
+        throw new DuplicatedRecommendationException(recommendation.username);
       }
       throw error;
     }

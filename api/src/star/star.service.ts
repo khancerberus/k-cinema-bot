@@ -8,6 +8,7 @@ import { Op } from 'sequelize';
 import { TmdbService } from '@/tmdb/tmdb.service';
 
 export interface MovieStar {
+  tmdbId: number;
   title: string;
   year: string;
   director: string;
@@ -64,6 +65,7 @@ export class StarService {
         const lastWatchedAt = movieStars[0]?.createdAt;
 
         return {
+          tmdbId: movie.tmdbId,
           title: movieDetail?.title || 'Unknown',
           year: movieDetail?.release_date.split('-')[0] || 'Unknown',
           director:
@@ -88,6 +90,52 @@ export class StarService {
     );
 
     return movies;
+  }
+
+  async getMovieDetails(tmdbId: number) {
+    const movieDetail = await this.tmdbService.getMovie(tmdbId);
+    const stars = await this.getStarsByMovie(tmdbId);
+    const users = await this.userService.getAll();
+
+    return {
+      tmdbId,
+      title: movieDetail?.title || 'Unknown',
+      year: movieDetail?.release_date.split('-')[0] || 'Unknown',
+      director:
+        movieDetail?.credits.crew
+          .filter((member) => member.job === 'Director')
+          .map((director) => director.name)
+          .join(', ') || 'Unknown',
+      rating:
+        stars.length > 0
+          ? Number(
+              (
+                stars.reduce((sum, s) => sum + Number(s.score), 0) /
+                stars.length
+              ).toFixed(1),
+            )
+          : 0,
+      synopsis: movieDetail?.overview || 'No synopsis available',
+      lastWatched:
+        stars.length > 0
+          ? stars[0].createdAt.toLocaleDateString('es-ES', {
+              day: '2-digit',
+              month: '2-digit',
+              year: '2-digit',
+            })
+          : 'Unknown',
+      posterUrl: movieDetail?.poster_path
+        ? `https://image.tmdb.org/t/p/w500${movieDetail.poster_path}`
+        : 'No poster available',
+      stars: stars.map((s) => {
+        const user = users.find((u) => u.userId === s.userId);
+        return {
+          username: user?.username || 'Unknown',
+          score: s.score,
+          createdAt: s.createdAt,
+        };
+      }),
+    };
   }
 
   async submitStar(submitStarDto: SubmitStarDto) {

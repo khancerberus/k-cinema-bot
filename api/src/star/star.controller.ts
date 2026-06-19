@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { StarService } from './star.service';
 import type { SubmitStarDto } from './star.dto';
 
@@ -9,6 +9,11 @@ export class StarController {
   @Get('movies')
   getMovies() {
     return this.starService.getMovies();
+  }
+
+  @Get('movie/:tmdbId')
+  getMovieDetails(@Param('tmdbId') tmdbId: number) {
+    return this.starService.getMovieDetails(tmdbId);
   }
 
   @Post('submit')

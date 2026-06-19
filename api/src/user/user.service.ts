@@ -14,6 +14,10 @@ export class UserService {
     return this.userModel.create(userData);
   }
 
+  async getAll() {
+    return this.userModel.findAll();
+  }
+
   async getUserById(userId: number) {
     return this.userModel.findByPk(userId);
   }
