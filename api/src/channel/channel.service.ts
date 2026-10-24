@@ -9,8 +9,8 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Channel } from './channel.model';
 import type {
   ChannelProfile,
-  LoginBody,
   UpdateChannelBody,
+  VerifiedIdentity,
 } from './channel.dto';
 import {
   ChannelSettings,
@@ -22,8 +22,6 @@ import {
 } from './channel.settings';
 import { TwitchChatService } from '@/twitch/twitch-chat.service';
 
-const USERNAME_PATTERN = /^[a-z0-9_]{2,25}$/;
-const CHANNEL_ID_PATTERN = /^\d{1,20}$/;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const MAX_HIDDEN_ITEMS = 500;
 
@@ -73,22 +71,12 @@ export class ChannelService {
     return channel;
   }
 
-  // Login provisional: el streamer escribe su nombre y su ID de Twitch.
-  // TODO: reemplazar por OAuth de Twitch/Kick, que entrega ambos datos verificados
-  async login(body: LoginBody): Promise<Channel> {
+  // Alta o actualización del canal tras el login con Twitch (datos ya verificados por OAuth)
+  async upsertFromTwitch(identity: VerifiedIdentity): Promise<Channel> {
     const channelUsername = ChannelService.normalizeUsername(
-      body.channelUsername ?? '',
+      identity.channelUsername,
     );
-    const channelId = String(body.channelId ?? '').trim();
-
-    if (!USERNAME_PATTERN.test(channelUsername)) {
-      throw new BadRequestException('El nombre del canal no es válido.');
-    }
-    if (!CHANNEL_ID_PATTERN.test(channelId)) {
-      throw new BadRequestException(
-        'El ID de Twitch debe ser numérico (por ejemplo 123456789).',
-      );
-    }
+    const channelId = identity.channelId;
 
     const byName = await this.channelModel.findOne({
       where: { channelUsername },
