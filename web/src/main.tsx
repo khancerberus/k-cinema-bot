@@ -63,7 +63,10 @@ const router = createBrowserRouter([
       },
     ],
   },
-]);
+], {
+  // Subruta del despliegue, definida con VITE_BASE_PATH
+  basename: import.meta.env.BASE_URL,
+});
 
 const root = document.getElementById("root");
 
