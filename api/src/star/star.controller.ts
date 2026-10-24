@@ -1,23 +1,27 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
 import { StarService } from './star.service';
-import type { SubmitStarDto } from './star.dto';
+import { ChannelService } from '@/channel/channel.service';
 
-@Controller('star')
+// Ratings públicos de un canal. Las estrellas se envían desde el chat (!star)
+@Controller('channels/:channel/movies')
 export class StarController {
-  constructor(private readonly starService: StarService) {}
+  constructor(
+    private readonly starService: StarService,
+    private readonly channelService: ChannelService,
+  ) {}
 
-  @Get('movies')
-  getMovies() {
-    return this.starService.getMovies();
+  @Get()
+  async getMovies(@Param('channel') channelUsername: string) {
+    const channel = await this.channelService.getByUsername(channelUsername);
+    return this.starService.getMovies(channel.channelId);
   }
 
-  @Get('movie/:tmdbId')
-  getMovieDetails(@Param('tmdbId') tmdbId: number) {
-    return this.starService.getMovieDetails(tmdbId);
-  }
-
-  @Post('submit')
-  submitStar(@Body() submitStarDto: SubmitStarDto) {
-    return this.starService.submitStar(submitStarDto);
+  @Get(':tmdbId')
+  async getMovieDetails(
+    @Param('channel') channelUsername: string,
+    @Param('tmdbId', ParseIntPipe) tmdbId: number,
+  ) {
+    const channel = await this.channelService.getByUsername(channelUsername);
+    return this.starService.getMovieDetails(channel.channelId, tmdbId);
   }
 }
