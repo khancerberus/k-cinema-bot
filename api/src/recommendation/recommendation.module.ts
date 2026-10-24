@@ -9,5 +9,6 @@ import { TmdbModule } from '@/tmdb/tmdb.module';
   controllers: [RecommendationController],
   providers: [RecommendationService],
   imports: [SequelizeModule.forFeature([Recommendation]), TmdbModule],
+  exports: [RecommendationService],
 })
 export class RecommendationModule {}

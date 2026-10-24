@@ -11,7 +11,12 @@ export interface FilmMetadataProps {
   posterUrl: string;
 }
 
+interface MovieRatingCardProps extends FilmMetadataProps {
+  channelUsername: string;
+}
+
 export const MovieRatingCard = ({
+  channelUsername,
   tmdbId,
   title,
   year,
@@ -20,7 +25,7 @@ export const MovieRatingCard = ({
   rating,
   lastWatched,
   posterUrl,
-}: FilmMetadataProps) => {
+}: MovieRatingCardProps) => {
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
 
   const toggleSynopsis = () => {
@@ -67,14 +72,18 @@ export const MovieRatingCard = ({
 
         <div className="text-sm text-[#00fff9] opacity-90 ">
           <p>
-            <span className="font-bold">Ultima vez visto:</span> {lastWatched}
+            <span className="font-bold">Ultima vez visto:</span> {new Date(lastWatched).toLocaleDateString("es-ES", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "2-digit",
+            })}
           </p>
         </div>
       </div>
 
       <a
         className="absolute top-1 right-2 border border-[#00fff9] text-[#00fff9] px-2 py-1 rounded opacity-90 hover:bg-[#00fff9]/10 transition-colors duration-300"
-        href={`/rated-movies/movie/${tmdbId}`}
+        href={`/${channelUsername}/rated-movies/movie/${tmdbId}`}
         target="_blank"
         rel="noopener noreferrer"
       >

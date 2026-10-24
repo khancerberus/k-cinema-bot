@@ -9,9 +9,15 @@ import { StarModule } from './star/star.module';
 import { TmdbModule } from './tmdb/tmdb.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UserModule } from './user/user.module';
+import { RedisModule } from './redis/redis.module';
+import { TwitchChatModule } from './twitch/twitch-chat.module';
+import { TwitchBotModule } from './twitch/twitch-bot.module';
+import { DatabaseModule } from './database/database.module';
+import { ChannelModule } from './channel/channel.module';
 
 @Module({
   imports: [
+    RedisModule,
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -23,7 +29,8 @@ import { UserModule } from './user/user.module';
         uri: configService.get<string>('DATABASE_URL'),
         models: [],
         autoLoadModels: true,
-        synchronize: true,
+        // La estructura la gestiona DatabaseSetupService (migración que solo añade)
+        synchronize: false,
         pool: {
           max: 10,
           min: 0,
@@ -36,6 +43,10 @@ import { UserModule } from './user/user.module';
     StarModule,
     TmdbModule,
     UserModule,
+    DatabaseModule,
+    ChannelModule,
+    TwitchChatModule,
+    TwitchBotModule,
   ],
   controllers: [AppController],
   providers: [

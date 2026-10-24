@@ -2,8 +2,13 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import RatedMoviesPage from "./pages/RatedMoviesPage";
 import { MainLayout } from "./components/MainLayout"
+import { ChannelLayout } from "./components/ChannelLayout"
 import { MovieStarsPage } from "./pages/MovieStarsPage"
 import { CurrentMoviePage } from "./pages/CurrentMoviePage"
+import { HomePage } from "./pages/HomePage"
+import { LoginPage } from "./pages/LoginPage"
+import { ChannelNotFoundPage } from "./pages/ChannelNotFoundPage"
+import { apiFetch, channelPath } from "./lib/api";
 
 const router = createBrowserRouter([
   {
@@ -11,31 +16,51 @@ const router = createBrowserRouter([
     Component: MainLayout,
     children: [
       {
-        path: "/rated-movies",
-        Component: RatedMoviesPage,
+        index: true,
+        Component: LoginPage,
       },
       {
-        path: "/rated-movies/movie/:tmdbId",
+        path: ":channel",
         loader: async ({ params }) => {
-          const response = await fetch(`http://localhost:4000/star/movie/${params.tmdbId}`);
+          const response = await apiFetch(channelPath(params.channel ?? ""));
+          if (response.status === 404) {
+            throw new Response("Channel not found", { status: 404 });
+          }
           if (!response.ok) {
-            throw new Error("Failed to fetch movie stars");
+            throw new Error("Failed to fetch channel");
           }
           return response.json();
         },
-        Component: MovieStarsPage,
+        Component: ChannelLayout,
+        ErrorBoundary: ChannelNotFoundPage,
+        children: [
+          {
+            index: true,
+            Component: HomePage,
+          },
+          {
+            path: "rated-movies",
+            Component: RatedMoviesPage,
+          },
+          {
+            path: "rated-movies/movie/:tmdbId",
+            loader: async ({ params }) => {
+              const response = await apiFetch(
+                `${channelPath(params.channel ?? "")}/movies/${params.tmdbId}`,
+              );
+              if (!response.ok) {
+                throw new Error("Failed to fetch movie stars");
+              }
+              return response.json();
+            },
+            Component: MovieStarsPage,
+          },
+          {
+            path: "current-movie",
+            Component: CurrentMoviePage,
+          },
+        ],
       },
-      {
-        path: '/current-movie',
-        loader: async () => {
-          const response = await fetch('http://localhost:4000/current-movie');
-          if (!response.ok) {
-            return null;
-          }
-          return response.json();
-        },
-        Component: CurrentMoviePage,
-      }
     ],
   },
 ]);

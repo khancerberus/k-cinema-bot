@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { useLoaderData } from "react-router";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { apiFetch, channelPath, readApiError } from "../lib/api";
+import { useChannel } from "../lib/channel-context";
 
 interface CurrentMovie {
   tmdbId: number;
@@ -9,39 +10,72 @@ interface CurrentMovie {
 }
 
 export const CurrentMoviePage = () => {
-  const loadedMovie = useLoaderData<CurrentMovie | null>();
+  const { channel, isOwner } = useChannel();
+  const basePath = `${channelPath(channel.channelUsername)}/current-movie`;
 
-  const [currentMovie, setCurrentMovie] = useState<CurrentMovie | null>(loadedMovie);
+  const [currentMovie, setCurrentMovie] = useState<CurrentMovie | null>(null);
   const [tmdbId, setTmdbId] = useState("");
 
-  const fetchCurrentMovie = async () => {
-    const response = await fetch("http://localhost:4000/current-movie");
-    if (!response.ok) {
-      setCurrentMovie(null);
-      return;
-    }
+  const loadCurrentMovie = useCallback(async (): Promise<CurrentMovie | null> => {
+    const response = await apiFetch(basePath);
+    return response.ok ? ((await response.json()) as CurrentMovie) : null;
+  }, [basePath]);
 
-    const movie = (await response.json()) as CurrentMovie;
-    setCurrentMovie(movie);
+  const fetchCurrentMovie = async () => {
+    setCurrentMovie(await loadCurrentMovie());
   };
+
+  useEffect(() => {
+    if (!isOwner) return;
+
+    let cancelled = false;
+    loadCurrentMovie()
+      .then((movie) => {
+        if (!cancelled) setCurrentMovie(movie);
+      })
+      .catch((error) => console.error("Error:", error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, loadCurrentMovie]);
+
+  // Solo el streamer del canal (con sesión iniciada) puede gestionar la película
+  if (!isOwner) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 gap-4 px-4 py-10 text-center">
+        <h1 className="text-8xl font-bold font-bebaskai">Current Movie</h1>
+        <p className="text-xl text-gray-300">
+          Solo el streamer de {channel.displayName} puede ver esta página.
+        </p>
+        <a href="/" className="text-[#00fff9] hover:underline">
+          Entrar con tu canal
+        </a>
+      </div>
+    );
+  }
 
   const handleSetMovie = async () => {
     try {
-      const response = await fetch("http://localhost:4000/current-movie/set", {
+      const response = await apiFetch(basePath, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ channelUsername: "khancerberus", tmdbId: Number(tmdbId) }),
+        // announce: el bot avisa en el chat que ya se puede puntuar
+        body: JSON.stringify({ tmdbId: Number(tmdbId), announce: true }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to set current movie");
+        toast.error(await readApiError(response));
+        return;
       }
+
+      const message = await response.text();
 
       await fetchCurrentMovie();
       setTmdbId("");
-      toast.success("Current movie updated successfully!");
+      toast.success(message || "Current movie updated successfully!");
     } catch (error) {
       console.error("Error:", error);
       toast.error("Failed to update current movie.");
@@ -50,16 +84,20 @@ export const CurrentMoviePage = () => {
 
   const handleClearMovie = async () => {
     try {
-      const response = await fetch("http://localhost:4000/current-movie", {
+      // announce=true: el bot publica en el chat el resumen de la votación
+      const response = await apiFetch(`${basePath}?announce=true`, {
         method: "DELETE",
       });
 
       if (!response.ok) {
-        throw new Error("Failed to clear current movie");
+        toast.error(await readApiError(response));
+        return;
       }
 
+      const message = await response.text();
+
       setCurrentMovie(null);
-      toast.success("Current movie cleared successfully!");
+      toast.success(message || "Current movie cleared successfully!");
     } catch (error) {
       console.error("Error:", error);
       toast.error("Failed to clear current movie.");
