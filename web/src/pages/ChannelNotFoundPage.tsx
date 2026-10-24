@@ -1,4 +1,4 @@
-import { isRouteErrorResponse, useParams, useRouteError } from "react-router";
+import { isRouteErrorResponse, Link, useParams, useRouteError } from "react-router";
 
 export const ChannelNotFoundPage = () => {
   const error = useRouteError();
@@ -13,9 +13,9 @@ export const ChannelNotFoundPage = () => {
           ? `El canal "${channel}" no está registrado en K-Cinema.`
           : "No se pudo cargar el canal. Inténtalo de nuevo más tarde."}
       </p>
-      <a href="/" className="text-[#00fff9] hover:underline">
+      <Link to="/" className="text-[#00fff9] hover:underline">
         Volver al inicio
-      </a>
+      </Link>
     </div>
   );
 };

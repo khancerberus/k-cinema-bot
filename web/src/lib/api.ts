@@ -1,16 +1,25 @@
 import type { FilmMetadataProps } from "../components/MovieRatingCard";
-import { getSession } from "./session";
+import { clearSession, getSession } from "./session";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
-// fetch contra la API que añade la sesión provisional del streamer, si la hay
-export const apiFetch = (path: string, init: RequestInit = {}) => {
+// La API redirige a Twitch y vuelve a la web con el token en el fragmento (#token=...)
+export const TWITCH_LOGIN_URL = `${API_URL}/auth/twitch`;
+
+// fetch contra la API que añade el token de sesión del streamer, si lo hay
+export const apiFetch = async (path: string, init: RequestInit = {}) => {
   const headers = new Headers(init.headers);
   const session = getSession();
-  if (session) {
-    headers.set("X-Channel-Session", session.channelId);
+  const token = headers.get("Authorization") ? null : session?.token;
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(`${API_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  // Token caducado o revocado: se olvida la sesión para volver a entrar con Twitch
+  if (response.status === 401 && token) {
+    clearSession();
+  }
+  return response;
 };
 
 // Extrae el mensaje de error que devuelve la API ({ message } o texto plano)

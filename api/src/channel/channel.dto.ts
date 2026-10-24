@@ -1,6 +1,7 @@
 import type { ChannelSettings } from './channel.settings';
 
-export interface LoginBody {
+// Identidad del streamer verificada por el OAuth de Twitch
+export interface VerifiedIdentity {
   channelUsername: string;
   channelId: string;
 }

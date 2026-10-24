@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { apiFetch, channelPath, readApiError } from "../lib/api";
@@ -48,9 +49,9 @@ export const CurrentMoviePage = () => {
         <p className="text-xl text-gray-300">
           Solo el streamer de {channel.displayName} puede ver esta página.
         </p>
-        <a href="/" className="text-[#00fff9] hover:underline">
+        <Link to="/" className="text-[#00fff9] hover:underline">
           Entrar con tu canal
-        </a>
+        </Link>
       </div>
     );
   }

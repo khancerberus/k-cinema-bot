@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useState } from "react";
 
 export interface FilmMetadataProps {
@@ -81,14 +82,14 @@ export const MovieRatingCard = ({
         </div>
       </div>
 
-      <a
+      <Link
         className="absolute top-1 right-2 border border-[#00fff9] text-[#00fff9] px-2 py-1 rounded opacity-90 hover:bg-[#00fff9]/10 transition-colors duration-300"
-        href={`/${channelUsername}/rated-movies/movie/${tmdbId}`}
+        to={`/${channelUsername}/rated-movies/movie/${tmdbId}`}
         target="_blank"
         rel="noopener noreferrer"
       >
         <p className="text-sm">Ver rating</p>
-      </a>
+      </Link>
     </div>
   );
 };

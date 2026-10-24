@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import type { FilmMetadataProps } from "./MovieRatingCard";
 import { MoviePoster } from "./MoviePoster";
 
@@ -34,9 +35,9 @@ export const TopMoviesCard = ({
         <ol className="flex flex-col gap-2">
           {movies.map((movie, index) => (
             <li key={movie.tmdbId} className="flex flex-row items-center gap-2">
-              <a
+              <Link
                 className="flex flex-1 min-w-0 flex-row items-center gap-3 rounded-lg p-2 border border-transparent hover:border-[#00fff9]/60 hover:bg-[#00fff9]/5 transition-colors duration-300"
-                href={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
+                to={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
               >
                 <span
                   className="w-8 shrink-0 text-center text-4xl font-bebaskai"
@@ -60,7 +61,7 @@ export const TopMoviesCard = ({
                 </div>
 
                 <span className="shrink-0 text-2xl text-[#ffa300]">{movie.rating}★</span>
-              </a>
+              </Link>
 
               {onHide && (
                 <button

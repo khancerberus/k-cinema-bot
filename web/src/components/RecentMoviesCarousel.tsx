@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FilmMetadataProps } from "./MovieRatingCard";
 import { MoviePoster } from "./MoviePoster";
@@ -74,9 +75,9 @@ export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentM
           className="flex flex-row gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {movies.map((movie) => (
-            <a
+            <Link
               key={movie.tmdbId}
-              href={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
+              to={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
               className="group flex flex-col gap-2 w-40 shrink-0 snap-start"
             >
               <div className="relative w-40 h-60 rounded-lg overflow-hidden outline-1 outline-[#cf0060]/60 group-hover:outline-2 group-hover:outline-[#00fff9] transition-all duration-300">
@@ -103,7 +104,7 @@ export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentM
                   })}
                 </p>
               </div>
-            </a>
+            </Link>
           ))}
         </div>
       )}
