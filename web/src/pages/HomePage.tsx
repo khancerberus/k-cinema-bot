@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { FilmMetadataProps } from "../components/MovieRatingCard";
-import { sortMovies } from "../components/MovieSort";
 import { TopMoviesCard } from "../components/TopMoviesCard";
 import { RecentMoviesCarousel } from "../components/RecentMoviesCarousel";
 import { ChannelSettingsCard } from "../components/ChannelSettingsCard";
-import { apiFetch, channelPath, fetchRatedMovies, readApiError } from "../lib/api";
+import { apiFetch, channelPath, fetchRatedMovies, readApiError, type RatedMoviesQuery } from "../lib/api";
 import { useChannel } from "../lib/channel-context";
 import type { ChannelProfile, ChannelSection } from "../types/channel.type";
+
+// Máximo que admite la API por página
+const MAX_PAGE_SIZE = 100;
 
 const SECTION_SUBTITLES: Record<ChannelSection["kind"], string> = {
   "top-best": "Las películas con mejor rating promedio",
@@ -17,26 +19,76 @@ const SECTION_SUBTITLES: Record<ChannelSection["kind"], string> = {
 
 export const HomePage = () => {
   const { channel, setChannel, isOwner } = useChannel();
-  const [movieData, setMovieData] = useState<FilmMetadataProps[]>([]);
+  // Películas de cada sección (id de sección → películas), pedidas ya ordenadas a la API
+  const [sectionMovies, setSectionMovies] = useState<Record<string, FilmMetadataProps[]>>({});
+  // Títulos de las películas ocultas, para la lista del editor
+  const [hiddenTitles, setHiddenTitles] = useState<Record<number, string>>({});
   // Mientras se edita, la página muestra el borrador para ver los cambios al momento
   const [draft, setDraft] = useState<ChannelProfile | null>(null);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    fetchRatedMovies(channel.channelUsername)
-      .then((movies) => setMovieData(movies))
-      .catch((error) => console.error("Error fetching movie data:", error));
-  }, [channel.channelUsername]);
 
   const profile = draft ?? channel;
   const hiddenIds = useMemo(
     () => new Set(profile.settings.hidden.map((item) => item.tmdbId)),
     [profile.settings.hidden],
   );
-  const visibleMovies = useMemo(
-    () => movieData.filter((movie) => !hiddenIds.has(movie.tmdbId)),
-    [movieData, hiddenIds],
+
+  // Cada top pide su tamaño más la cantidad de ocultas, para seguir lleno al ocultar alguna
+  const sectionsKey = JSON.stringify(
+    profile.settings.sections.map((section) => [section.id, section.kind, section.size]),
   );
+  const hiddenCount = profile.settings.hidden.length;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const sections = JSON.parse(sectionsKey) as Array<[string, ChannelSection["kind"], number]>;
+
+    const timer = setTimeout(() => {
+      Promise.all(
+        sections.map(async ([id, kind, size]) => {
+          const query: RatedMoviesQuery =
+            kind === "recent"
+              ? { sort: "lastWatched", dir: "desc", pageSize: size }
+              : {
+                  sort: "rating",
+                  dir: kind === "top-best" ? "desc" : "asc",
+                  pageSize: Math.min(MAX_PAGE_SIZE, size + hiddenCount),
+                };
+          const page = await fetchRatedMovies(channel.channelUsername, query, controller.signal);
+          return [id, page.items] as const;
+        }),
+      )
+        .then((entries) => setSectionMovies(Object.fromEntries(entries)))
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) console.error("Error fetching movie data:", error);
+        });
+    }, 200);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [channel.channelUsername, sectionsKey, hiddenCount]);
+
+  // Solo al editar: títulos de las ocultas que no aparecen en ninguna sección
+  const hiddenIdsKey = draft ? draft.settings.hidden.map((item) => item.tmdbId).join(",") : "";
+  useEffect(() => {
+    if (!hiddenIdsKey) return;
+    const controller = new AbortController();
+    const ids = hiddenIdsKey.split(",").map(Number).slice(0, MAX_PAGE_SIZE);
+
+    fetchRatedMovies(channel.channelUsername, { ids, pageSize: ids.length }, controller.signal)
+      .then((page) =>
+        setHiddenTitles(
+          Object.fromEntries(page.items.map((movie) => [movie.tmdbId, `${movie.title} (${movie.year})`])),
+        ),
+      )
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) console.error("Error fetching hidden movies:", error);
+      });
+
+    return () => controller.abort();
+  }, [channel.channelUsername, hiddenIdsKey]);
 
   const hide = (tmdbId: number) => {
     if (!draft) return;
@@ -82,8 +134,10 @@ export const HomePage = () => {
   };
 
   const titleFor = (tmdbId: number) => {
-    const movie = movieData.find((m) => m.tmdbId === tmdbId);
-    return movie ? `${movie.title} (${movie.year})` : `TMDB ${tmdbId}`;
+    const movie = Object.values(sectionMovies)
+      .flat()
+      .find((m) => m.tmdbId === tmdbId);
+    return movie ? `${movie.title} (${movie.year})` : (hiddenTitles[tmdbId] ?? `TMDB ${tmdbId}`);
   };
 
   // Cada tipo de contenido tiene su propio render. Hoy solo existen películas;
@@ -97,19 +151,20 @@ export const HomePage = () => {
           key={section.id}
           channelUsername={channel.channelUsername}
           title={section.title}
-          movies={sortMovies(movieData, { key: "lastWatched", direction: "desc" }).slice(0, section.size)}
+          movies={(sectionMovies[section.id] ?? []).slice(0, section.size)}
         />
       );
     }
 
-    const direction = section.kind === "top-best" ? "desc" : "asc";
     return (
       <TopMoviesCard
         key={section.id}
         channelUsername={channel.channelUsername}
         title={section.title}
         subtitle={SECTION_SUBTITLES[section.kind]}
-        movies={sortMovies(visibleMovies, { key: "rating", direction }).slice(0, section.size)}
+        movies={(sectionMovies[section.id] ?? [])
+          .filter((movie) => !hiddenIds.has(movie.tmdbId))
+          .slice(0, section.size)}
         accentColor={section.kind === "top-best" ? "#ffa300" : "#ff2a4b"}
         onHide={draft ? hide : undefined}
       />

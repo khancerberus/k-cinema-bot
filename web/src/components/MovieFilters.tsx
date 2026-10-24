@@ -1,57 +1,13 @@
-import type { FilmMetadataProps } from "./MovieRatingCard";
-
-export interface MovieFilterValues {
-  minRating: string;
-  maxRating: string;
-  watchedFrom: string;
-  watchedTo: string;
-  minYear: string;
-  maxYear: string;
-}
-
-export const emptyMovieFilters: MovieFilterValues = {
-  minRating: "",
-  maxRating: "",
-  watchedFrom: "",
-  watchedTo: "",
-  minYear: "",
-  maxYear: "",
-};
-
-export const filterMovies = (
-  movies: FilmMetadataProps[],
-  filters: MovieFilterValues,
-) => {
-  // Los inputs de fecha devuelven "YYYY-MM-DD"; se comparan en hora local e incluyen el día completo
-  const watchedFrom = filters.watchedFrom
-    ? new Date(`${filters.watchedFrom}T00:00:00`).getTime()
-    : null;
-  const watchedTo = filters.watchedTo
-    ? new Date(`${filters.watchedTo}T23:59:59.999`).getTime()
-    : null;
-
-  return movies.filter((movie) => {
-    if (filters.minRating && movie.rating < Number(filters.minRating)) return false;
-    if (filters.maxRating && movie.rating > Number(filters.maxRating)) return false;
-
-    const lastWatched = Date.parse(movie.lastWatched);
-    if (watchedFrom !== null && !(lastWatched >= watchedFrom)) return false;
-    if (watchedTo !== null && !(lastWatched <= watchedTo)) return false;
-
-    // Las películas con año "Unknown" quedan fuera si se filtra por año
-    const year = Number(movie.year);
-    if (filters.minYear && !(year >= Number(filters.minYear))) return false;
-    if (filters.maxYear && !(year <= Number(filters.maxYear))) return false;
-
-    return true;
-  });
-};
+import {
+  emptyMovieFilters,
+  type MovieFilterValues,
+} from "../lib/movie-query";
 
 interface MovieFiltersProps {
   filters: MovieFilterValues;
   onChange: (filters: MovieFilterValues) => void;
-  resultCount: number;
-  totalCount: number;
+  // null mientras se espera la respuesta de la API
+  resultCount: number | null;
 }
 
 const inputClassName =
@@ -61,7 +17,6 @@ export const MovieFilters = ({
   filters,
   onChange,
   resultCount,
-  totalCount,
 }: MovieFiltersProps) => {
   const updateFilter = (key: keyof MovieFilterValues, value: string) => {
     onChange({ ...filters, [key]: value });
@@ -166,8 +121,14 @@ export const MovieFilters = ({
       </div>
 
       <p className="text-sm text-[#00fff9] opacity-90">
-        Mostrando <span className="font-bold">{resultCount}</span> de{" "}
-        <span className="font-bold">{totalCount}</span> películas
+        {resultCount === null ? (
+          "Buscando..."
+        ) : (
+          <>
+            <span className="font-bold">{resultCount}</span>{" "}
+            {resultCount === 1 ? "película encontrada" : "películas encontradas"}
+          </>
+        )}
       </p>
     </div>
   );
