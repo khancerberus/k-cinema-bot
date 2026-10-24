@@ -1,5 +1,6 @@
 import type { FilmMetadataProps } from "../components/MovieRatingCard";
 import { clearSession, getSession } from "./session";
+import type { MovieSortKey, SortDirection } from "./movie-query";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -40,17 +41,46 @@ export const readApiError = async (response: Response) => {
 export const channelPath = (channelUsername: string) =>
   `/channels/${encodeURIComponent(channelUsername)}`;
 
-export const fetchRatedMovies = async (channelUsername: string): Promise<FilmMetadataProps[]> => {
-  const response = await apiFetch(`${channelPath(channelUsername)}/movies`);
+export interface RatedMoviesQuery {
+  q?: string;
+  page?: number;
+  pageSize?: number;
+  sort?: MovieSortKey;
+  dir?: SortDirection;
+  minRating?: string;
+  maxRating?: string;
+  // ISO 8601
+  watchedFrom?: string;
+  watchedTo?: string;
+  minYear?: string;
+  maxYear?: string;
+  ids?: number[];
+}
+
+export interface MoviePage {
+  items: FilmMetadataProps[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+// Películas puntuadas de un canal. Búsqueda, filtros, orden y paginación los resuelve la API
+export const fetchRatedMovies = async (
+  channelUsername: string,
+  query: RatedMoviesQuery = {},
+  signal?: AbortSignal,
+): Promise<MoviePage> => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === "") continue;
+    params.set(key, Array.isArray(value) ? value.join(",") : String(value));
+  }
+
+  const search = params.size ? `?${params.toString()}` : "";
+  const response = await apiFetch(`${channelPath(channelUsername)}/movies${search}`, { signal });
   if (!response.ok) {
-    throw new Error(`Failed to fetch movies: ${response.status}`);
+    throw new Error(await readApiError(response));
   }
-
-  const data: unknown = await response.json();
-  if (Array.isArray(data)) {
-    return data as FilmMetadataProps[];
-  }
-
-  console.error("Unexpected movie payload:", data);
-  return [];
+  return (await response.json()) as MoviePage;
 };

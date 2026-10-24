@@ -16,9 +16,15 @@ export interface HiddenItem {
   tmdbId: number;
 }
 
+// Comandos del bot personalizables. En !kcinema, {url} es el enlace al perfil
+export interface ChannelCommands {
+  kcinema: { message: string };
+}
+
 export interface ChannelSettings {
   sections: ChannelSection[];
   hidden: HiddenItem[];
+  commands: ChannelCommands;
 }
 
 export interface ChannelProfile {
@@ -33,3 +39,4 @@ export interface ChannelProfile {
 
 export const MIN_SECTION_SIZE = 1;
 export const MAX_SECTION_SIZE = 20;
+export const MAX_KCINEMA_MESSAGE_LENGTH = 300;

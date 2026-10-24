@@ -1,14 +1,9 @@
-import type { FilmMetadataProps } from "./MovieRatingCard";
-
-export type MovieSortKey = "title" | "rating" | "lastWatched" | "year";
-export type SortDirection = "asc" | "desc";
-
-export interface MovieSortValue {
-  key: MovieSortKey;
-  direction: SortDirection;
-}
-
-export const defaultMovieSort: MovieSortValue = { key: "lastWatched", direction: "desc" };
+import {
+  defaultMovieSort,
+  type MovieSortKey,
+  type MovieSortValue,
+  type SortDirection,
+} from "../lib/movie-query";
 
 const sortOptions: Array<{ key: MovieSortKey; label: string; defaultDirection: SortDirection }> = [
   { key: "title", label: "Título", defaultDirection: "asc" },
@@ -16,30 +11,6 @@ const sortOptions: Array<{ key: MovieSortKey; label: string; defaultDirection: S
   { key: "lastWatched", label: "Última vez visto", defaultDirection: "desc" },
   { key: "year", label: "Año de la película", defaultDirection: "desc" },
 ];
-
-const getSortValue = (movie: FilmMetadataProps, key: Exclude<MovieSortKey, "title">) => {
-  if (key === "rating") return movie.rating;
-  if (key === "lastWatched") return Date.parse(movie.lastWatched);
-  return Number(movie.year);
-};
-
-export const sortMovies = (movies: FilmMetadataProps[], sort: MovieSortValue) => {
-  const factor = sort.direction === "asc" ? 1 : -1;
-
-  return [...movies].sort((a, b) => {
-    if (sort.key === "title") {
-      return factor * a.title.localeCompare(b.title, "es", { sensitivity: "base" });
-    }
-
-    // Los valores inválidos (año "Unknown", fecha vacía) van siempre al final
-    const valueA = getSortValue(a, sort.key);
-    const valueB = getSortValue(b, sort.key);
-    if (Number.isNaN(valueA)) return Number.isNaN(valueB) ? 0 : 1;
-    if (Number.isNaN(valueB)) return -1;
-
-    return factor * (valueA - valueB);
-  });
-};
 
 interface MovieSortProps {
   sort: MovieSortValue;

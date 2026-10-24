@@ -1,4 +1,5 @@
 import {
+  MAX_KCINEMA_MESSAGE_LENGTH,
   MAX_SECTION_SIZE,
   MIN_SECTION_SIZE,
   type ChannelProfile,
@@ -99,6 +100,29 @@ export const ChannelSettingsCard = ({
           value={draft.description}
           onChange={(e) => onChange({ ...draft, description: e.target.value })}
         />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-bold">Mensaje del comando !kcinema</span>
+        <input
+          className={inputClassName}
+          maxLength={MAX_KCINEMA_MESSAGE_LENGTH}
+          value={draft.settings.commands.kcinema.message}
+          onChange={(e) =>
+            onChange({
+              ...draft,
+              settings: {
+                ...draft.settings,
+                commands: { ...draft.settings.commands, kcinema: { message: e.target.value } },
+              },
+            })
+          }
+        />
+        <span className="text-xs text-stone-500">
+          Lo responde el bot cuando alguien escribe !kcinema en tu chat. Escribe {"{url}"} donde quieras el enlace
+          a tu perfil (si no lo pones, se añade al final). Tus mods también pueden cambiarlo con !kcinema set
+          &lt;mensaje&gt;.
+        </span>
       </label>
 
       <fieldset className="flex flex-col gap-2">

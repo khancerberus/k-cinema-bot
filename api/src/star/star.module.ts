@@ -9,6 +9,7 @@ import { CurrentMovieService } from './current-movie.service';
 import { TmdbModule } from '@/tmdb/tmdb.module';
 import { CurrentMovieController } from './current-movie.controller';
 import { ChannelModule } from '@/channel/channel.module';
+import { MovieModule } from '@/movie/movie.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ChannelModule } from '@/channel/channel.module';
     UserModule,
     TmdbModule,
     ChannelModule,
+    MovieModule,
   ],
   controllers: [StarController, CurrentMovieController],
   providers: [StarService, CurrentMovieService],
