@@ -13,11 +13,15 @@ import type {
   VerifiedIdentity,
 } from './channel.dto';
 import {
+  ChannelCommands,
   ChannelSettings,
+  DEFAULT_KCINEMA_MESSAGE,
+  MAX_KCINEMA_MESSAGE_LENGTH,
   MAX_SECTION_SIZE,
   MEDIA_TYPES,
   MIN_SECTION_SIZE,
   SECTION_KINDS,
+  defaultChannelCommands,
   defaultChannelSettings,
 } from './channel.settings';
 import { TwitchChatService } from '@/twitch/twitch-chat.service';
@@ -47,7 +51,10 @@ export class ChannelService {
       displayName: channel.displayName,
       description: channel.description,
       accentColor: channel.accentColor,
-      settings: channel.settings,
+      settings: {
+        ...channel.settings,
+        commands: channel.settings.commands ?? defaultChannelCommands(),
+      },
     };
   }
 
@@ -158,6 +165,20 @@ export class ChannelService {
     return channel;
   }
 
+  // Cambia el mensaje de !kcinema (desde el chat). null vuelve al mensaje por defecto
+  async setKcinemaMessage(channel: Channel, message: string | null) {
+    channel.settings = {
+      ...channel.settings,
+      commands: this.validateCommands({
+        ...channel.settings.commands,
+        kcinema: { message: message ?? DEFAULT_KCINEMA_MESSAGE },
+      }),
+    };
+    channel.changed('settings', true);
+    await channel.save();
+    return channel.settings.commands!.kcinema.message;
+  }
+
   async listByPlatform(platform: Channel['platform']) {
     return this.channelModel.findAll({ where: { platform } });
   }
@@ -211,6 +232,7 @@ export class ChannelService {
 
     return {
       sections,
+      commands: this.validateCommands(settings.commands),
       hidden: hidden.map((item) => {
         const tmdbId = Number(item?.tmdbId);
         if (
@@ -223,5 +245,21 @@ export class ChannelService {
         return { mediaType: item.mediaType, tmdbId };
       }),
     };
+  }
+
+  private validateCommands(
+    commands: Partial<ChannelCommands> | undefined,
+  ): ChannelCommands {
+    const raw = commands?.kcinema?.message;
+    if (raw === undefined) return defaultChannelCommands();
+
+    // Un solo renglón: el chat de Twitch no admite saltos de línea
+    const message = String(raw).replace(/\s+/g, ' ').trim();
+    if (message.length < 1 || message.length > MAX_KCINEMA_MESSAGE_LENGTH) {
+      throw new BadRequestException(
+        `El mensaje de !kcinema debe tener entre 1 y ${MAX_KCINEMA_MESSAGE_LENGTH} caracteres.`,
+      );
+    }
+    return { kcinema: { message } };
   }
 }

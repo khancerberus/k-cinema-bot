@@ -19,6 +19,18 @@ export type ChatMessageHandler = (
 const toIrcChannel = (channel: string) =>
   channel.startsWith('#') ? channel.toLowerCase() : `#${channel.toLowerCase()}`;
 
+// Solo para desarrollo: si TWITCH_BOT_CHANNELS está definida (canales separados por coma), el bot
+// entra únicamente a esos canales. Así un bot local no responde en los mismos chats que producción.
+const allowedChannels = () => {
+  const list = process.env.TWITCH_BOT_CHANNELS?.split(',')
+    .map((channel) => toIrcChannel(channel.trim()))
+    .filter((channel) => channel.length > 1);
+  return list?.length ? new Set(list) : null;
+};
+
+const isAllowed = (channel: string) =>
+  allowedChannels()?.has(toIrcChannel(channel)) ?? true;
+
 @Injectable()
 export class TwitchChatService
   implements OnApplicationBootstrap, OnModuleDestroy
@@ -52,13 +64,23 @@ export class TwitchChatService
       where: { platform: 'twitch' },
     });
 
+    const joinedChannels = channels
+      .map((channel) => channel.channelUsername)
+      .filter(isAllowed);
+
     this.client = new tmi.Client({
       identity: {
         username: process.env.BOT_USERNAME,
         password: process.env.BOT_TOKEN,
       },
-      channels: channels.map((channel) => channel.channelUsername),
+      channels: joinedChannels,
     });
+
+    if (allowedChannels()) {
+      this.logger.warn(
+        `TWITCH_BOT_CHANNELS: el bot solo entra a ${[...allowedChannels()!].join(', ')}`,
+      );
+    }
 
     this.client.on('message', (channel, tags, message, self) => {
       if (self) return;
@@ -74,7 +96,7 @@ export class TwitchChatService
       .connect()
       .then(() =>
         this.logger.log(
-          `Conectado al chat de Twitch (${channels.length} canales)`,
+          `Conectado al chat de Twitch (${joinedChannels.length} canales)`,
         ),
       )
       .catch((error) =>
@@ -92,7 +114,7 @@ export class TwitchChatService
 
   // Entra al chat de un canal recién registrado o renombrado
   async join(channel: string) {
-    if (!this.isConnected()) return;
+    if (!this.isConnected() || !isAllowed(channel)) return;
     await this.client!.join(toIrcChannel(channel)).catch((error) =>
       this.logger.warn(`No se pudo entrar al chat de ${channel}: ${error}`),
     );

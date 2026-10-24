@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { CurrentMovie } from './current-movie.model';
 import { Star } from './star.model';
-import { TmdbService } from '@/tmdb/tmdb.service';
+import { MovieService, releaseYearOf } from '@/movie/movie.service';
 import { SetMovieBody } from './current-movie.dto';
 import { TwitchChatService } from '@/twitch/twitch-chat.service';
 import type { Channel } from '@/channel/channel.model';
@@ -26,7 +26,7 @@ export class CurrentMovieService {
     private currentMovieModel: typeof CurrentMovie,
     @InjectModel(Star)
     private starModel: typeof Star,
-    private readonly tmdbService: TmdbService,
+    private readonly movieService: MovieService,
     private readonly twitchChat: TwitchChatService,
   ) {}
 
@@ -36,7 +36,7 @@ export class CurrentMovieService {
   ): Promise<MovieActionResult> {
     const { tmdbId, announce } = body;
 
-    const movie = await this.tmdbService.getMovie(tmdbId);
+    const movie = await this.movieService.getCached(tmdbId);
 
     // Se busca por channelId: no cambia aunque el canal se renombre
     const existing = await this.currentMovieModel.findOne({
@@ -63,7 +63,10 @@ export class CurrentMovieService {
     }
 
     const status = existing ? 'actualizado' : 'establecido';
-    const year = movie.release_date.split('-')[0];
+    // Queda en el índice de búsqueda aunque todavía no tenga estrellas
+    this.movieService.syncMetadataInBackground([tmdbId]);
+
+    const year = String(releaseYearOf(movie) ?? '?');
     const message = `La pelicula se ha ${status} a "${movie.title} (${year})" con TMDB ID ${tmdbId}`;
 
     if (!announce) {
@@ -92,7 +95,7 @@ export class CurrentMovieService {
       );
     }
 
-    const movie = await this.tmdbService.getMovie(currentMovie.tmdbId);
+    const movie = await this.movieService.getCached(currentMovie.tmdbId);
 
     if (!movie) {
       throw new NotFoundException(
@@ -103,7 +106,7 @@ export class CurrentMovieService {
     return {
       tmdbId: currentMovie.tmdbId,
       title: movie.title,
-      releaseYear: movie.release_date.split('-')[0],
+      releaseYear: String(releaseYearOf(movie) ?? '?'),
     };
   }
 
@@ -124,9 +127,9 @@ export class CurrentMovieService {
     }
 
     const { tmdbId } = currentMovie;
-    const movie = await this.tmdbService.getMovie(tmdbId);
+    const movie = await this.movieService.getCached(tmdbId);
     const movieLabel = movie
-      ? `"${movie.title} (${movie.release_date.split('-')[0]})"`
+      ? `"${movie.title} (${releaseYearOf(movie) ?? '?'})"`
       : `TMDB ID ${tmdbId}`;
 
     // Mismo criterio que submitStar: una valoración por película al día

@@ -4,6 +4,7 @@ import {
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { ChatUserstate } from 'tmi.js';
 import { TwitchChatService } from './twitch-chat.service';
 import { RecommendationService } from '@/recommendation/recommendation.service';
@@ -15,6 +16,10 @@ import {
 import { ChannelService } from '@/channel/channel.service';
 import type { Channel } from '@/channel/channel.model';
 import { extractTmdbId } from '@/utils/url-decoder.utils';
+import { buildKcinemaMessage } from '@/channel/channel.settings';
+
+// Tiempo mínimo entre respuestas a !kcinema en un mismo canal (evita spam)
+const KCINEMA_COOLDOWN_MS = 30_000;
 
 type CommandHandler = (
   channel: Channel,
@@ -32,7 +37,11 @@ export class TwitchCommandsService implements OnModuleInit {
     '!star': (channel, tags, args) => this.submitStar(channel, tags, args),
     '!setmovie': (channel, tags, args) => this.setMovie(channel, tags, args),
     '!clearmovie': (channel, tags) => this.clearMovie(channel, tags),
+    '!kcinema': (channel, tags, args) => this.kcinema(channel, tags, args),
   };
+
+  // channelId → última vez que se respondió a !kcinema
+  private readonly kcinemaLastReply = new Map<string, number>();
 
   constructor(
     private readonly twitchChat: TwitchChatService,
@@ -40,6 +49,7 @@ export class TwitchCommandsService implements OnModuleInit {
     private readonly starService: StarService,
     private readonly currentMovieService: CurrentMovieService,
     private readonly channelService: ChannelService,
+    private readonly config: ConfigService,
   ) {}
 
   onModuleInit() {
@@ -220,6 +230,62 @@ export class TwitchCommandsService implements OnModuleInit {
       channel,
       () => this.currentMovieService.clearCurrentMovie(channel, true),
       `Disculpa ${displayName}, hubo un error al cerrar la puntuación.`,
+    );
+  }
+
+  // !kcinema → enlace al perfil del canal en la web
+  // !kcinema set <mensaje> / !kcinema reset → solo streamer o mods
+  private async kcinema(channel: Channel, tags: ChatUserstate, args: string[]) {
+    const displayName = this.displayName(tags);
+    const action = args[0]?.toLowerCase();
+
+    if (action === 'set' || action === 'reset') {
+      if (!this.isModerator(channel, tags)) {
+        await this.twitchChat.say(
+          channel.channelUsername,
+          `Disculpa ${displayName}, solo el streamer o los mods pueden cambiar este mensaje.`,
+        );
+        return;
+      }
+
+      const message = action === 'set' ? args.slice(1).join(' ').trim() : null;
+      if (action === 'set' && !message) {
+        await this.twitchChat.say(
+          channel.channelUsername,
+          `@${displayName}, Uso: !kcinema set <mensaje>. Usa {url} donde quieras el enlace al perfil.`,
+        );
+        return;
+      }
+
+      await this.reply(
+        channel,
+        async () => {
+          const saved = await this.channelService.setKcinemaMessage(
+            channel,
+            message,
+          );
+          return `@${displayName}, mensaje de !kcinema actualizado: "${saved}"`;
+        },
+        `Disculpa ${displayName}, no se pudo guardar el mensaje.`,
+      );
+      return;
+    }
+
+    const now = Date.now();
+    const lastReply = this.kcinemaLastReply.get(channel.channelId) ?? 0;
+    if (now - lastReply < KCINEMA_COOLDOWN_MS) return;
+    this.kcinemaLastReply.set(channel.channelId, now);
+
+    const webUrl = (this.config.get<string>('WEB_URL') ?? '').replace(
+      /\/+$/,
+      '',
+    );
+    await this.twitchChat.say(
+      channel.channelUsername,
+      buildKcinemaMessage(
+        channel.settings,
+        `${webUrl}/${channel.channelUsername}`,
+      ),
     );
   }
 }

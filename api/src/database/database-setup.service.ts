@@ -38,6 +38,7 @@ export class DatabaseSetupService implements OnModuleInit {
 
     // Crea las tablas que falten (p. ej. Channels). Sin force ni alter: no toca las existentes
     await this.sequelize.sync();
+    await this.enableRowLevelSecurity('Movies');
 
     if (legacyChannel && legacyChannelId) {
       const [, created] = await Channel.findOrCreate({
@@ -174,6 +175,22 @@ export class DatabaseSetupService implements OnModuleInit {
       true,
       transaction,
     );
+  }
+
+  // En Supabase las tablas de "public" se exponen por su API REST (anon key). Con RLS activo y
+  // sin políticas, esa API no ve nada; la API de K-Cinema entra como dueña de la tabla y no le afecta.
+  private async enableRowLevelSecurity(table: string) {
+    const [row] = await this.sequelize.query<{ rls: boolean }>(
+      `SELECT relrowsecurity AS rls FROM pg_class
+        WHERE relname = :table AND relnamespace = 'public'::regnamespace`,
+      { replacements: { table }, type: QueryTypes.SELECT },
+    );
+    if (!row || row.rls) return;
+
+    await this.sequelize.query(
+      `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`,
+    );
+    this.logger.log(`${table}: RLS activado`);
   }
 
   private async countWhere(sql: string, transaction: Transaction) {

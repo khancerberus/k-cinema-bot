@@ -1,12 +1,23 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { CreateStarDto, SubmitStarDto } from './star.dto';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  CreateStarDto,
+  MovieListQuery,
+  MoviePage,
+  MovieSortKey,
+  SubmitStarDto,
+} from './star.dto';
 import { UserService } from '@/user/user.service';
 import { CurrentMovieService } from './current-movie.service';
-import { InjectModel } from '@nestjs/sequelize';
+import { InjectConnection, InjectModel } from '@nestjs/sequelize';
 import { Star } from './star.model';
-import { Op } from 'sequelize';
-import { TmdbService } from '@/tmdb/tmdb.service';
-import Redis from 'ioredis';
+import { Op, QueryTypes } from 'sequelize';
+import { Sequelize } from 'sequelize-typescript';
+import {
+  MovieService,
+  directorsOf,
+  releaseYearOf,
+  type CachedMovie,
+} from '@/movie/movie.service';
 
 export interface MovieStar {
   tmdbId: number;
@@ -17,21 +28,6 @@ export interface MovieStar {
   rating: number;
   lastWatched: Date;
   posterUrl: string;
-}
-
-export interface TmdbCrewMember {
-  job: string;
-  name: string;
-}
-
-export interface TmdbMovieDetail {
-  title: string;
-  release_date: string;
-  overview: string;
-  poster_path: string;
-  credits: {
-    crew: TmdbCrewMember[];
-  };
 }
 
 export interface StarRecord {
@@ -62,46 +58,56 @@ export interface SubmitStarResponse {
   stars: number;
 }
 
+interface RatedMovieRow {
+  tmdbId: number;
+  rating: number;
+  lastWatched: Date;
+  title: string | null;
+  releaseYear: number | null;
+  director: string | null;
+  metadataUpdatedAt: Date | null;
+  total: number;
+}
+
+// Columnas por las que se puede ordenar (lista blanca: nunca se interpola texto del usuario)
+const SORT_COLUMNS: Record<MovieSortKey, string> = {
+  title: 'lower(m."title")',
+  rating: 'agg."rating"',
+  lastWatched: 'agg."lastWatched"',
+  year: 'm."releaseYear"',
+};
+
+// Búsqueda sin distinguir mayúsculas ni tildes
+const normalize = (sql: string) =>
+  `translate(lower(${sql}), 'áéíóúüñàèìòùâêîôûç', 'aeiouunaeiouaeiouc')`;
+const SEARCH_COLUMNS = [
+  'm."title"',
+  'm."originalTitle"',
+  'm."director"',
+  'm."releaseYear"::text',
+];
+
+// Los comodines de LIKE escritos por el usuario se buscan literalmente
+const escapeLike = (text: string) => text.replace(/[!%_]/g, (c) => `!${c}`);
+
+const posterUrlOf = (movie: CachedMovie | null | undefined) =>
+  movie?.poster_path
+    ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+    : 'No poster available';
+
 @Injectable()
 export class StarService {
   constructor(
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
     @InjectModel(Star)
     private starModel: typeof Star,
+    @InjectConnection() private readonly sequelize: Sequelize,
     private readonly currentMovieService: CurrentMovieService,
     private readonly userService: UserService,
-    private readonly tmdbService: TmdbService,
+    private readonly movieService: MovieService,
   ) {}
 
   async createStar(starData: CreateStarDto) {
     return this.starModel.create(starData);
-  }
-
-  // Obtiene los datos estáticos de TMDB desde Redis, o de TMDB si no están en caché
-  private async getCachedMovie(
-    tmdbId: number,
-  ): Promise<TmdbMovieDetail | null> {
-    const cacheKey = `tmdb:movie:${tmdbId}`;
-    const cachedData = await this.redis.get(cacheKey);
-
-    if (cachedData) {
-      const parsedMovieDetail: unknown = JSON.parse(cachedData);
-      return parsedMovieDetail as TmdbMovieDetail;
-    }
-
-    const movieDetail = await this.tmdbService.getMovie(tmdbId);
-
-    // Guardamos en Redis por 1 año (365 días = 31536000 segundos)
-    if (movieDetail) {
-      await this.redis.set(
-        cacheKey,
-        JSON.stringify(movieDetail),
-        'EX',
-        31536000,
-      );
-    }
-
-    return movieDetail;
   }
 
   async getStarsByMovie(channelId: string, tmdbId: number) {
@@ -111,77 +117,143 @@ export class StarService {
     });
   }
 
-  async getMovies(channelId: string): Promise<MovieStar[]> {
-    // The last seen is the most recent star for each movie, so we can order by createdAt and group by tmdbId
-    const ratedMovies = await this.starModel.findAll({
-      attributes: ['tmdbId'],
-      where: { channelId },
-      group: ['tmdbId'],
-    });
+  // Películas puntuadas de un canal: filtra, busca, ordena y pagina en la base de datos.
+  // Solo las películas de la página piden sinopsis y póster a Redis.
+  async getMovies(
+    channelId: string,
+    query: MovieListQuery,
+  ): Promise<MoviePage<MovieStar>> {
+    const emptyPage = {
+      items: [],
+      total: 0,
+      page: query.page,
+      pageSize: query.pageSize,
+      totalPages: 0,
+    };
+    const conditions: string[] = [];
+    const replacements: Record<string, unknown> = {
+      channelId,
+      limit: query.pageSize,
+      offset: (query.page - 1) * query.pageSize,
+    };
 
-    const stars = await this.starModel.findAll({
-      attributes: ['tmdbId', 'score', 'createdAt'],
-      where: { channelId },
-      order: [['createdAt', 'DESC']],
-    });
+    if (query.q) {
+      replacements.q = `%${escapeLike(query.q.toLowerCase())}%`;
+      const matches = SEARCH_COLUMNS.map(
+        (column) => `${normalize(column)} LIKE ${normalize(':q')} ESCAPE '!'`,
+      );
+      conditions.push(`(${matches.join(' OR ')})`);
+    }
 
-    const movies = await Promise.all(
-      ratedMovies.map(async (movie) => {
-        const movieDetail = await this.getCachedMovie(movie.tmdbId);
+    const ranges: Array<[keyof MovieListQuery, string, string]> = [
+      ['minRating', 'agg."rating"', '>='],
+      ['maxRating', 'agg."rating"', '<='],
+      ['watchedFrom', 'agg."lastWatched"', '>='],
+      ['watchedTo', 'agg."lastWatched"', '<='],
+      ['minYear', 'm."releaseYear"', '>='],
+      ['maxYear', 'm."releaseYear"', '<='],
+    ];
+    for (const [key, column, operator] of ranges) {
+      if (query[key] === undefined) continue;
+      replacements[key] = query[key];
+      conditions.push(`${column} ${operator} :${key}`);
+    }
 
-        // Cálculos dinámicos (estrellas y fechas) se ejecutan SIEMPRE
-        // Así te aseguras de que el usuario siempre vea su última valoración real
-        const movieTmdbId = Number(movie.tmdbId);
-        const movieStars = stars.filter(
-          (s) => Number(s.tmdbId) === movieTmdbId,
-        );
+    if (query.ids) {
+      if (!query.ids.length) return emptyPage;
+      replacements.ids = query.ids;
+      conditions.push('agg."tmdbId" IN (:ids)');
+    }
 
-        const averageRating =
-          movieStars.length > 0
-            ? movieStars.reduce((sum, s) => sum + Number(s.score), 0) /
-              movieStars.length
-            : 0;
-        const roundedAverageRating = Number(averageRating.toFixed(1));
-        const lastWatchedAt = movieStars[0]?.createdAt;
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const direction = query.dir === 'asc' ? 'ASC' : 'DESC';
+    const fromRatedMovies = (select: string) => `
+      WITH agg AS (
+        SELECT "tmdbId",
+               ROUND(AVG("score")::numeric, 1)::float AS "rating",
+               MAX("createdAt") AS "lastWatched"
+          FROM "Stars"
+         WHERE "channelId" = :channelId
+         GROUP BY "tmdbId"
+      )
+      SELECT ${select}
+        FROM agg
+        LEFT JOIN "Movies" m ON m."mediaType" = 'movie' AND m."tmdbId" = agg."tmdbId"
+      ${where}`;
 
-        // Retornamos el objeto combinado
-        return {
-          tmdbId: movie.tmdbId,
-          title: movieDetail?.title || 'Unknown',
-          // Agregado el '?' antes de .split para evitar crashes si release_date es undefined
-          year: movieDetail?.release_date?.split('-')[0] || 'Unknown',
-          director:
-            movieDetail?.credits?.crew
-              ?.filter((member: { job: string }) => member.job === 'Director')
-              .map((director: { name: string }) => director.name)
-              .join(', ') || 'Unknown',
-          rating: roundedAverageRating,
-          synopsis: movieDetail?.overview || 'No synopsis available',
-          lastWatched: lastWatchedAt,
-          posterUrl: movieDetail?.poster_path
-            ? `https://image.tmdb.org/t/p/w500${movieDetail.poster_path}`
-            : 'No poster available',
-        };
-      }),
+    const rows = await this.sequelize.query<RatedMovieRow>(
+      `${fromRatedMovies(`
+         agg."tmdbId", agg."rating", agg."lastWatched",
+         m."title", m."releaseYear", m."director", m."updatedAt" AS "metadataUpdatedAt",
+         COUNT(*) OVER()::int AS "total"`)}
+       ORDER BY ${SORT_COLUMNS[query.sort]} ${direction} NULLS LAST, agg."tmdbId" ${direction}
+       LIMIT :limit OFFSET :offset`,
+      { replacements, type: QueryTypes.SELECT },
     );
 
-    return movies;
+    // Página fuera de rango: no hay filas de las que leer el total
+    let total = rows[0]?.total ?? 0;
+    if (!rows.length && query.page > 1) {
+      const [count] = await this.sequelize.query<{ total: number }>(
+        fromRatedMovies('COUNT(*)::int AS "total"'),
+        { replacements, type: QueryTypes.SELECT },
+      );
+      total = count?.total ?? 0;
+    }
+    if (!rows.length)
+      return {
+        ...emptyPage,
+        total,
+        totalPages: Math.ceil(total / query.pageSize),
+      };
+
+    const tmdbIds = rows.map((row) => Number(row.tmdbId));
+    const details = await this.movieService.getCachedMany(tmdbIds);
+
+    // Películas sin fila en Movies o con datos de más de 30 días: se actualizan tras responder
+    this.movieService.syncMetadataInBackground(
+      rows
+        .filter((row) => this.movieService.isStale(row.metadataUpdatedAt))
+        .map((row) => Number(row.tmdbId)),
+    );
+
+    const items = rows.map((row): MovieStar => {
+      const tmdbId = Number(row.tmdbId);
+      const movie = details.get(tmdbId);
+      const year = row.releaseYear ?? releaseYearOf(movie ?? null);
+
+      return {
+        tmdbId,
+        title: row.title || movie?.title || 'Unknown',
+        year: year ? String(year) : 'Unknown',
+        director: row.director || directorsOf(movie).join(', ') || 'Unknown',
+        rating: Number(row.rating),
+        synopsis: movie?.overview || 'No synopsis available',
+        lastWatched: row.lastWatched,
+        posterUrl: posterUrlOf(movie),
+      };
+    });
+
+    return {
+      items,
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+      totalPages: Math.ceil(total / query.pageSize),
+    };
   }
 
   async getMovieDetails(channelId: string, tmdbId: number) {
-    const movieDetail = await this.getCachedMovie(tmdbId);
+    const movieDetail = await this.movieService.getCached(tmdbId);
     const stars = await this.getStarsByMovie(channelId, tmdbId);
     const users = await this.userService.getAll();
+    const year = releaseYearOf(movieDetail);
 
     return {
       tmdbId,
       title: movieDetail?.title || 'Unknown',
-      year: movieDetail?.release_date.split('-')[0] || 'Unknown',
-      director:
-        movieDetail?.credits.crew
-          .filter((member) => member.job === 'Director')
-          .map((director) => director.name)
-          .join(', ') || 'Unknown',
+      year: year ? String(year) : 'Unknown',
+      director: directorsOf(movieDetail).join(', ') || 'Unknown',
       rating:
         stars.length > 0
           ? Number(
@@ -200,9 +272,7 @@ export class StarService {
               year: '2-digit',
             })
           : 'Unknown',
-      posterUrl: movieDetail?.poster_path
-        ? `https://image.tmdb.org/t/p/w500${movieDetail.poster_path}`
-        : 'No poster available',
+      posterUrl: posterUrlOf(movieDetail),
       stars: stars.map((s) => {
         const user = users.find((u) => u.userId === s.userId);
         return {
@@ -262,6 +332,8 @@ export class StarService {
       mediaType: 'movie',
       score: submitStarDto.stars,
     });
+    // La película puntuada queda en el índice de búsqueda (Movies)
+    this.movieService.syncMetadataInBackground([currentMovie.tmdbId]);
 
     const fullStars = Math.floor(submitStarDto.stars);
     const hasHalfStar = submitStarDto.stars % 1 !== 0;
