@@ -11,14 +11,10 @@ export interface Star {
   updatedAt: Date;
 }
 
-export interface SubmitStarDto {
-  channelId: string;
+export interface ChatVoter {
   userId: number;
   username: string;
-  stars: number;
 }
-
-export type CreateStarDto = Omit<Star, 'id' | 'createdAt' | 'updatedAt'>;
 
 export const MOVIE_SORT_KEYS = [
   'title',
@@ -26,7 +22,10 @@ export const MOVIE_SORT_KEYS = [
   'lastWatched',
   'year',
 ] as const;
-export type MovieSortKey = (typeof MOVIE_SORT_KEYS)[number];
+// cat:<key> ordena por el promedio de una categoría (p. ej. cat:sound)
+export type CategorySortKey = `cat:${string}`;
+export type MovieSortKey = (typeof MOVIE_SORT_KEYS)[number] | CategorySortKey;
+export const CATEGORY_SORT_PATTERN = /^cat:([a-z0-9_-]{1,20})$/;
 export type SortDirection = 'asc' | 'desc';
 
 // Consulta de películas puntuadas de un canal (ya validada en el controller)

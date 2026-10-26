@@ -1,5 +1,5 @@
-// Tipos de contenido que se pueden puntuar. A futuro: 'series', 'game', ...
-export type MediaType = 'movie';
+// Tipos de contenido que se pueden puntuar. A futuro: 'series', ...
+export type MediaType = 'movie' | 'game';
 
 export type SectionKind = 'top-best' | 'top-worst' | 'recent';
 
@@ -22,14 +22,92 @@ export interface ChannelCommands {
   kcinema: { message: string };
 }
 
+// Categoría de puntuación. La key no cambia nunca: renombrar solo cambia la label
+// y quitar una categoría la archiva, así los votos antiguos siguen teniendo nombre.
+export interface RatingCategory {
+  key: string;
+  label: string;
+  archived?: boolean;
+}
+
+export interface RatingSettings {
+  // Sin categorías activas se puntúa con una sola nota (como las películas)
+  categories: Record<MediaType, RatingCategory[]>;
+}
+
+// Ventana de votación: tiempo que se puede puntuar tras activar un contenido
+export interface VotingSettings {
+  defaultMinutes: number;
+}
+
+// !apelar: pedir la corrección de un voto equivocado
+export interface AppealSettings {
+  enabled: boolean;
+}
+
 export interface ChannelSettings {
   sections: ChannelSection[];
   hidden: HiddenItem[];
-  // Opcional: los canales creados antes de existir no lo tienen guardado
+  // Opcionales: los canales creados antes de existir no los tienen guardados
   commands?: ChannelCommands;
+  rating?: RatingSettings;
+  voting?: VotingSettings;
+  appeals?: AppealSettings;
 }
 
-export const MEDIA_TYPES: MediaType[] = ['movie'];
+export type ResolvedChannelSettings = Required<ChannelSettings>;
+
+export const MEDIA_TYPES: MediaType[] = ['movie', 'game'];
+
+export const MAX_CATEGORIES = 6;
+export const MAX_CATEGORY_LABEL_LENGTH = 20;
+export const CATEGORY_KEY_PATTERN = /^[a-z0-9_-]{1,20}$/;
+export const MIN_VOTING_MINUTES = 10;
+export const MAX_VOTING_MINUTES = 240;
+export const DEFAULT_VOTING_MINUTES = 10;
+
+export const defaultRatingSettings = (): RatingSettings => ({
+  categories: {
+    movie: [],
+    game: [
+      { key: 'graphics', label: 'Gráficos' },
+      { key: 'sound', label: 'Sonido' },
+      { key: 'control', label: 'Control' },
+      { key: 'originality', label: 'Originalidad' },
+    ],
+  },
+});
+
+// Ajustes con valores por defecto en lo que no esté guardado
+export const resolveSettings = (
+  settings: ChannelSettings,
+): ResolvedChannelSettings => {
+  const defaults = defaultRatingSettings();
+  return {
+    ...settings,
+    commands: settings.commands ?? defaultChannelCommands(),
+    rating: {
+      categories: Object.fromEntries(
+        MEDIA_TYPES.map((mediaType) => [
+          mediaType,
+          settings.rating?.categories?.[mediaType] ??
+            defaults.categories[mediaType],
+        ]),
+      ) as Record<MediaType, RatingCategory[]>,
+    },
+    voting: settings.voting ?? { defaultMinutes: DEFAULT_VOTING_MINUTES },
+    appeals: settings.appeals ?? { enabled: true },
+  };
+};
+
+// Categorías con las que se vota ahora (sin las archivadas)
+export const activeCategories = (
+  settings: ChannelSettings,
+  mediaType: MediaType,
+) =>
+  resolveSettings(settings)
+    .rating.categories[mediaType].filter((category) => !category.archived)
+    .map(({ key, label }) => ({ key, label }));
 export const SECTION_KINDS: SectionKind[] = ['top-best', 'top-worst', 'recent'];
 export const MIN_SECTION_SIZE = 1;
 export const MAX_SECTION_SIZE = 20;
@@ -77,4 +155,7 @@ export const defaultChannelSettings = (): ChannelSettings => ({
   ],
   hidden: [],
   commands: defaultChannelCommands(),
+  rating: defaultRatingSettings(),
+  voting: { defaultMinutes: DEFAULT_VOTING_MINUTES },
+  appeals: { enabled: true },
 });
