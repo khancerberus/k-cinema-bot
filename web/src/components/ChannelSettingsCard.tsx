@@ -1,16 +1,27 @@
+import { useState } from "react";
 import {
   MAX_KCINEMA_MESSAGE_LENGTH,
   MAX_SECTION_SIZE,
+  MEDIA_LABELS,
   MIN_SECTION_SIZE,
   type ChannelProfile,
   type ChannelSection,
+  type MediaType,
+  type SectionKind,
 } from "../types/channel.type";
+import { RatingSettingsEditor } from "./RatingSettingsEditor";
+
+const SECTION_KIND_LABELS: Record<SectionKind, string> = {
+  "top-best": "Mejores",
+  "top-worst": "Peores",
+  recent: "Recientes",
+};
 
 interface ChannelSettingsCardProps {
   draft: ChannelProfile;
   onChange: (draft: ChannelProfile) => void;
-  // Título de cada película oculta, para mostrarlo en la lista
-  titleFor: (tmdbId: number) => string;
+  // Título de cada película o juego oculto, para mostrarlo en la lista
+  titleFor: (mediaType: MediaType, tmdbId: number) => string;
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
@@ -39,12 +50,56 @@ export const ChannelSettingsCard = ({
     });
   };
 
-  const unhide = (tmdbId: number) => {
+  const unhide = (mediaType: MediaType, tmdbId: number) => {
     onChange({
       ...draft,
       settings: {
         ...draft.settings,
-        hidden: draft.settings.hidden.filter((item) => item.tmdbId !== tmdbId),
+        hidden: draft.settings.hidden.filter(
+          (item) => item.mediaType !== mediaType || item.tmdbId !== tmdbId,
+        ),
+      },
+    });
+  };
+
+  const [newSection, setNewSection] = useState<{ mediaType: MediaType; kind: SectionKind }>({
+    mediaType: "game",
+    kind: "top-best",
+  });
+
+  const addSection = () => {
+    const ids = new Set(draft.settings.sections.map((section) => section.id));
+    let n = 1;
+    while (ids.has(`${newSection.mediaType}-${newSection.kind}-${n}`)) n++;
+    const { plural } = MEDIA_LABELS[newSection.mediaType];
+    const title =
+      newSection.kind === "recent"
+        ? `Últimos ${plural}`
+        : `Top 5 ${plural} ${newSection.kind === "top-best" ? "mejores" : "peores"}`;
+    onChange({
+      ...draft,
+      settings: {
+        ...draft.settings,
+        sections: [
+          ...draft.settings.sections,
+          {
+            id: `${newSection.mediaType}-${newSection.kind}-${n}`.slice(0, 20),
+            kind: newSection.kind,
+            mediaType: newSection.mediaType,
+            title: title.slice(0, 40),
+            size: newSection.kind === "recent" ? 10 : 5,
+          },
+        ],
+      },
+    });
+  };
+
+  const removeSection = (id: string) => {
+    onChange({
+      ...draft,
+      settings: {
+        ...draft.settings,
+        sections: draft.settings.sections.filter((section) => section.id !== id),
       },
     });
   };
@@ -125,10 +180,18 @@ export const ChannelSettingsCard = ({
         </span>
       </label>
 
+      <RatingSettingsEditor
+        settings={draft.settings}
+        onChange={(settings) => onChange({ ...draft, settings })}
+      />
+
       <fieldset className="flex flex-col gap-2">
         <legend className="text-sm font-bold mb-2">Secciones</legend>
         {draft.settings.sections.map((section) => (
-          <div key={section.id} className="grid grid-cols-[1fr_5rem] gap-2 items-center">
+          <div key={section.id} className="grid grid-cols-[auto_1fr_5rem_auto] gap-2 items-center">
+            <span className="text-xs text-stone-400 w-16" title={SECTION_KIND_LABELS[section.kind]}>
+              {section.mediaType === "game" ? "🎮" : "🎬"} {SECTION_KIND_LABELS[section.kind]}
+            </span>
             <input
               className={inputClassName}
               aria-label={`Título de la sección ${section.id}`}
@@ -149,18 +212,54 @@ export const ChannelSettingsCard = ({
                 })
               }
             />
+            <button
+              className="border border-[#cf0060]/60 text-gray-300 px-2 py-1 rounded text-xs hover:border-[#00fff9] hover:text-[#00fff9] transition-colors duration-300 cursor-pointer"
+              onClick={() => removeSection(section.id)}
+              aria-label={`Quitar la sección ${section.title}`}
+            >
+              Quitar
+            </button>
           </div>
         ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className={`${inputClassName} w-auto`}
+            aria-label="Contenido de la nueva sección"
+            value={newSection.mediaType}
+            onChange={(e) => setNewSection({ ...newSection, mediaType: e.target.value as MediaType })}
+          >
+            <option value="game">Juegos</option>
+            <option value="movie">Películas</option>
+          </select>
+          <select
+            className={`${inputClassName} w-auto`}
+            aria-label="Tipo de la nueva sección"
+            value={newSection.kind}
+            onChange={(e) => setNewSection({ ...newSection, kind: e.target.value as SectionKind })}
+          >
+            {(Object.keys(SECTION_KIND_LABELS) as SectionKind[]).map((kind) => (
+              <option key={kind} value={kind}>
+                {SECTION_KIND_LABELS[kind]}
+              </option>
+            ))}
+          </select>
+          <button
+            className="border border-[#00fff9] text-[#00fff9] px-2 py-1 rounded text-xs hover:bg-[#00fff9]/10 transition-colors duration-300 cursor-pointer"
+            onClick={addSection}
+          >
+            + Añadir sección
+          </button>
+        </div>
         <p className="text-xs text-stone-500">
-          El número es cuántas películas se muestran ({MIN_SECTION_SIZE} a {MAX_SECTION_SIZE}).
+          El número es cuántos elementos se muestran ({MIN_SECTION_SIZE} a {MAX_SECTION_SIZE}).
         </p>
       </fieldset>
 
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-bold">Películas ocultas en los tops</p>
+        <p className="text-sm font-bold">Ocultos en los tops</p>
         {draft.settings.hidden.length === 0 ? (
           <p className="text-xs text-stone-500">
-            Ninguna. Usa el botón "Ocultar" de cada película en los tops.
+            Ninguno. Usa el botón "Ocultar" de cada película o juego en los tops.
           </p>
         ) : (
           <ul className="flex flex-row flex-wrap gap-2">
@@ -169,10 +268,10 @@ export const ChannelSettingsCard = ({
                 key={`${item.mediaType}-${item.tmdbId}`}
                 className="flex flex-row items-center gap-2 border border-[#cf0060]/60 rounded px-2 py-1 text-sm"
               >
-                <span>{titleFor(item.tmdbId)}</span>
+                <span>{titleFor(item.mediaType, item.tmdbId)}</span>
                 <button
                   className="text-[#00fff9] hover:underline cursor-pointer"
-                  onClick={() => unhide(item.tmdbId)}
+                  onClick={() => unhide(item.mediaType, item.tmdbId)}
                 >
                   Mostrar
                 </button>

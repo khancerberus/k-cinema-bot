@@ -2,17 +2,25 @@ import { Link } from "react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FilmMetadataProps } from "./MovieRatingCard";
 import { MoviePoster } from "./MoviePoster";
+import { MEDIA_LABELS, itemPath, type MediaType } from "../types/channel.type";
 
 interface RecentMoviesCarouselProps {
   channelUsername: string;
   title: string;
   movies: FilmMetadataProps[];
+  mediaType?: MediaType;
 }
 
 const arrowClassName =
   "flex items-center justify-center w-10 h-10 rounded-full border border-[#00fff9] text-[#00fff9] text-xl hover:bg-[#00fff9]/10 transition-colors duration-300 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent";
 
-export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentMoviesCarouselProps) => {
+export const RecentMoviesCarousel = ({
+  channelUsername,
+  title,
+  movies,
+  mediaType = "movie",
+}: RecentMoviesCarouselProps) => {
+  const { plural } = MEDIA_LABELS[mediaType];
   const trackRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -43,7 +51,7 @@ export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentM
       <div className="flex flex-row items-end justify-between gap-2">
         <div>
           <h2 className="text-5xl font-bebaskai text-[#00fff9]">{title}</h2>
-          <p className="text-sm text-stone-500">Las {movies.length} películas vistas más recientemente</p>
+          <p className="text-sm text-stone-500">{mediaType === "game" ? `Los ${movies.length} ${plural} jugados` : `Las ${movies.length} ${plural} vistas`} más recientemente</p>
         </div>
 
         <div className="flex flex-row gap-2">
@@ -67,7 +75,7 @@ export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentM
       </div>
 
       {movies.length === 0 ? (
-        <p className="text-stone-500 py-6 text-center">Todavía no se ha visto ninguna película.</p>
+        <p className="text-stone-500 py-6 text-center">Todavía no hay {plural} puntuad{mediaType === "game" ? "os" : "as"}.</p>
       ) : (
         <div
           ref={trackRef}
@@ -77,7 +85,7 @@ export const RecentMoviesCarousel = ({ channelUsername, title, movies }: RecentM
           {movies.map((movie) => (
             <Link
               key={movie.tmdbId}
-              to={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
+              to={itemPath(channelUsername, movie.mediaType, movie.tmdbId)}
               className="group flex flex-col gap-2 w-40 shrink-0 snap-start"
             >
               <div className="relative w-40 h-60 rounded-lg overflow-hidden outline-1 outline-[#cf0060]/60 group-hover:outline-2 group-hover:outline-[#00fff9] transition-all duration-300">

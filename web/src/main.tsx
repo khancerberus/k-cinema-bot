@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
-import RatedMoviesPage from "./pages/RatedMoviesPage";
+import RatedMoviesPage, { RatedGamesPage } from "./pages/RatedMoviesPage";
 import { MainLayout } from "./components/MainLayout"
 import { ChannelLayout } from "./components/ChannelLayout"
 import { MovieStarsPage } from "./pages/MovieStarsPage"
@@ -9,6 +9,20 @@ import { HomePage } from "./pages/HomePage"
 import { LoginPage } from "./pages/LoginPage"
 import { ChannelNotFoundPage } from "./pages/ChannelNotFoundPage"
 import { apiFetch, channelPath } from "./lib/api";
+import { MEDIA_PATHS, type MediaType } from "./types/channel.type";
+
+// Detalle de una película o un juego con sus estrellas
+const itemLoader =
+  (mediaType: MediaType) =>
+  async ({ params }: { params: Record<string, string | undefined> }) => {
+    const response = await apiFetch(
+      `${channelPath(params.channel ?? "")}/${MEDIA_PATHS[mediaType].api}/${params.tmdbId}`,
+    );
+    if (!response.ok) {
+      throw new Error("Failed to fetch stars");
+    }
+    return response.json();
+  };
 
 const router = createBrowserRouter([
   {
@@ -44,15 +58,17 @@ const router = createBrowserRouter([
           },
           {
             path: "rated-movies/movie/:tmdbId",
-            loader: async ({ params }) => {
-              const response = await apiFetch(
-                `${channelPath(params.channel ?? "")}/movies/${params.tmdbId}`,
-              );
-              if (!response.ok) {
-                throw new Error("Failed to fetch movie stars");
-              }
-              return response.json();
-            },
+            loader: itemLoader("movie"),
+            Component: MovieStarsPage,
+          },
+          {
+            path: "rated-games",
+            Component: RatedGamesPage,
+          },
+          {
+            // :tmdbId es el ID de IGDB
+            path: "rated-games/game/:tmdbId",
+            loader: itemLoader("game"),
             Component: MovieStarsPage,
           },
           {

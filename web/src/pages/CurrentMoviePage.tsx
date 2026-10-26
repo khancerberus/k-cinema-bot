@@ -3,49 +3,124 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { apiFetch, channelPath, readApiError } from "../lib/api";
 import { useChannel } from "../lib/channel-context";
+import { MoviePoster } from "../components/MoviePoster";
+import {
+  MAX_VOTING_MINUTES,
+  MEDIA_LABELS,
+  MIN_VOTING_MINUTES,
+  type MediaType,
+} from "../types/channel.type";
 
-interface CurrentMovie {
-  tmdbId: number;
+// Votación abierta (GET /current-movie)
+interface CurrentItem {
+  mediaType: MediaType;
+  itemId: number;
   title: string;
   releaseYear: string;
+  posterUrl: string | null;
+  categories: Array<{ key: string; label: string }>;
+  closesAt: string | null;
+  votes: number;
 }
+
+// Resultado del buscador (GET /current-movie/search)
+interface SearchResult {
+  mediaType: MediaType;
+  id: number;
+  title: string;
+  year: number | null;
+  creator: string;
+  posterUrl: string | null;
+  platforms?: string[];
+}
+
+const SEARCH_DEBOUNCE_MS = 400;
+const REFRESH_MS = 15_000;
+
+const inputClassName =
+  "w-full bg-[#000117] border border-[#cf0060]/60 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-[#00fff9]";
+const buttonClassName =
+  "px-4 py-2 bg-[#cf0060] text-white rounded hover:bg-[#ff2a4b] transition-colors cursor-pointer disabled:bg-gray-500 disabled:cursor-not-allowed";
+const secondaryButtonClassName =
+  "px-3 py-2 border border-[#00fff9] text-[#00fff9] rounded hover:bg-[#00fff9]/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+
+const formatRemaining = (ms: number) => {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
 
 export const CurrentMoviePage = () => {
   const { channel, isOwner } = useChannel();
   const basePath = `${channelPath(channel.channelUsername)}/current-movie`;
 
-  const [currentMovie, setCurrentMovie] = useState<CurrentMovie | null>(null);
-  const [tmdbId, setTmdbId] = useState("");
+  const [current, setCurrent] = useState<CurrentItem | null>(null);
+  const [mediaType, setMediaType] = useState<MediaType>("game");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ key: string; items: SearchResult[] }>({ key: "", items: [] });
+  const [minutes, setMinutes] = useState(channel.settings.voting.defaultMinutes);
+  const [announce, setAnnounce] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
-  const loadCurrentMovie = useCallback(async (): Promise<CurrentMovie | null> => {
+  const searchKey = `${mediaType}:${query.trim()}`;
+  const searching = query.trim() !== "" && results.key !== searchKey;
+
+  const loadCurrent = useCallback(async (): Promise<CurrentItem | null> => {
     const response = await apiFetch(basePath);
-    return response.ok ? ((await response.json()) as CurrentMovie) : null;
+    return response.ok ? ((await response.json()) as CurrentItem) : null;
   }, [basePath]);
 
-  const fetchCurrentMovie = async () => {
-    setCurrentMovie(await loadCurrentMovie());
-  };
+  const refresh = useCallback(() => {
+    loadCurrent()
+      .then(setCurrent)
+      .catch((error) => console.error("Error:", error));
+  }, [loadCurrent]);
 
+  // Votación abierta: al entrar y cada poco (votos y cierre automático)
   useEffect(() => {
     if (!isOwner) return;
+    refresh();
+    const timer = setInterval(refresh, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [isOwner, refresh]);
 
-    let cancelled = false;
-    loadCurrentMovie()
-      .then((movie) => {
-        if (!cancelled) setCurrentMovie(movie);
-      })
-      .catch((error) => console.error("Error:", error));
+  // Cuenta atrás
+  useEffect(() => {
+    if (!current?.closesAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [current?.closesAt]);
+
+  // Búsqueda con un pequeño retraso mientras se escribe
+  useEffect(() => {
+    const text = query.trim();
+    if (!isOwner || !text) return;
+    const controller = new AbortController();
+    const key = `${mediaType}:${text}`;
+
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ type: mediaType, q: text });
+      apiFetch(`${basePath}/search?${params.toString()}`, { signal: controller.signal })
+        .then(async (response) => (response.ok ? ((await response.json()) as SearchResult[]) : []))
+        .then((items) => setResults({ key, items }))
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) console.error("Error:", error);
+        });
+    }, SEARCH_DEBOUNCE_MS);
 
     return () => {
-      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
-  }, [isOwner, loadCurrentMovie]);
+  }, [isOwner, basePath, mediaType, query]);
 
-  // Solo el streamer del canal (con sesión iniciada) puede gestionar la película
+  // Solo el streamer del canal (con sesión iniciada) puede gestionar la votación
   if (!isOwner) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-4 py-10 text-center">
-        <h1 className="text-8xl font-bold font-bebaskai">Current Movie</h1>
+        <h1 className="text-8xl font-bold font-bebaskai">Votación</h1>
         <p className="text-xl text-gray-300">
           Solo el streamer de {channel.displayName} puede ver esta página.
         </p>
@@ -56,96 +131,199 @@ export const CurrentMoviePage = () => {
     );
   }
 
-  const handleSetMovie = async () => {
+  const send = async (path: string, init: RequestInit, onDone?: () => void) => {
+    setBusy(true);
     try {
-      const response = await apiFetch(basePath, {
+      const response = await apiFetch(path, init);
+      if (!response.ok) {
+        toast.error(await readApiError(response));
+        return;
+      }
+      toast.success((await response.text()) || "Hecho");
+      onDone?.();
+      refresh();
+    } catch (error) {
+      console.error("Error:", error);
+      toast.error("No se pudo completar la acción.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const open = (itemId: number) =>
+    send(
+      basePath,
+      {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         // announce: el bot avisa en el chat que ya se puede puntuar
-        body: JSON.stringify({ tmdbId: Number(tmdbId), announce: true }),
-      });
+        body: JSON.stringify({ mediaType, itemId, minutes, announce }),
+      },
+      () => setQuery(""),
+    );
 
-      if (!response.ok) {
-        toast.error(await readApiError(response));
-        return;
-      }
+  // announce=true: el bot publica en el chat el resumen de la votación
+  const close = () => send(`${basePath}?announce=true`, { method: "DELETE" });
 
-      const message = await response.text();
+  const extend = (extra: number) =>
+    send(`${basePath}/extend`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes: extra }),
+    });
 
-      await fetchCurrentMovie();
-      setTmdbId("");
-      toast.success(message || "Current movie updated successfully!");
-    } catch (error) {
-      console.error("Error:", error);
-      toast.error("Failed to update current movie.");
-    }
-  };
-
-  const handleClearMovie = async () => {
-    try {
-      // announce=true: el bot publica en el chat el resumen de la votación
-      const response = await apiFetch(`${basePath}?announce=true`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        toast.error(await readApiError(response));
-        return;
-      }
-
-      const message = await response.text();
-
-      setCurrentMovie(null);
-      toast.success(message || "Current movie cleared successfully!");
-    } catch (error) {
-      console.error("Error:", error);
-      toast.error("Failed to clear current movie.");
-    }
-  };
+  const validMinutes =
+    Number.isInteger(minutes) && minutes >= MIN_VOTING_MINUTES && minutes <= MAX_VOTING_MINUTES;
+  const typedId = /^\d+$/.test(query.trim()) ? Number(query.trim()) : null;
+  const remaining = current?.closesAt ? new Date(current.closesAt).getTime() - now : null;
+  const labels = MEDIA_LABELS[mediaType];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full">
-      <h1 className="text-8xl font-bold mb-4 font-bebaskai">Current Movie</h1>
-      {!currentMovie ? (
-        <p className="text-xl text-gray-300">No movie is currently being watched.</p>
-      ) : (
-        <p className="text-xl text-gray-300">
-          Currently watching: {currentMovie.title} ({currentMovie.releaseYear})
-        </p>
-      )}
+    <div className="flex flex-col items-center gap-8 px-4 py-6 w-full max-w-3xl mx-auto">
+      <h1 className="text-8xl font-bold font-bebaskai">Votación</h1>
 
-      <div className="flex flex-col items-center justify-center mt-8 p-6 border border-[#cf0060] rounded-lg">
-        <h2 className="text-4xl font-bold mb-4">Set Movie</h2>
+      <section className="w-full flex flex-col gap-4 outline-2 outline-[#00fff9] rounded-xl p-4 bg-[#00fff9]/5">
+        <h2 className="text-2xl font-bold text-[#00fff9]">Votación abierta</h2>
+        {!current ? (
+          <p className="text-gray-400">No hay ninguna votación abierta. Elige qué puntuar abajo.</p>
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-4">
+            <MoviePoster
+              posterUrl={current.posterUrl ?? ""}
+              title={current.title}
+              year={current.releaseYear}
+              className="w-24 h-36 shrink-0 rounded"
+            />
+            <div className="flex flex-col gap-2 flex-1">
+              <p className="text-stone-500 text-sm">{MEDIA_LABELS[current.mediaType].singular}</p>
+              <p className="text-2xl font-bold text-[#ff2a4b]">
+                {current.title} ({current.releaseYear})
+              </p>
+              <p className="text-gray-300">
+                {current.votes} {current.votes === 1 ? "voto" : "votos"}
+                {current.categories.length > 0 && (
+                  <span className="text-gray-400"> · {current.categories.map((c) => c.label).join(", ")}</span>
+                )}
+              </p>
+              <p className="text-3xl tabular-nums text-[#ffa300]" aria-live="polite">
+                {remaining === null ? "Sin límite de tiempo" : `${formatRemaining(remaining)} restantes`}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {current.closesAt && (
+                  <>
+                    <button className={secondaryButtonClassName} onClick={() => extend(5)} disabled={busy}>
+                      +5 min
+                    </button>
+                    <button className={secondaryButtonClassName} onClick={() => extend(10)} disabled={busy}>
+                      +10 min
+                    </button>
+                  </>
+                )}
+                <button className={buttonClassName} onClick={close} disabled={busy}>
+                  Cerrar votación
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="w-full flex flex-col gap-4 outline-2 outline-[#cf0060] rounded-xl p-4 bg-[#cf0060]/10">
+        <h2 className="text-2xl font-bold text-[#ff2a4b]">Abrir votación</h2>
+        {current && (
+          <p className="text-sm text-stone-400">Abrir otra votación cierra la actual sin anunciar el resumen.</p>
+        )}
+
+        <div className="flex gap-2" role="tablist" aria-label="Tipo de contenido">
+          {(["game", "movie"] as MediaType[]).map((type) => (
+            <button
+              key={type}
+              role="tab"
+              aria-selected={mediaType === type}
+              className={`px-4 py-2 rounded border cursor-pointer transition-colors ${
+                mediaType === type
+                  ? "border-[#00fff9] bg-[#00fff9]/15 text-[#00fff9] font-bold"
+                  : "border-[#cf0060]/60 text-gray-300 hover:border-[#00fff9]"
+              }`}
+              onClick={() => setMediaType(type)}
+            >
+              {type === "game" ? "🎮 Juego" : "🎬 Película"}
+            </button>
+          ))}
+        </div>
+
         <input
-          className="mb-4 px-4 py-2 border border-gray-300 rounded w-full text-white bg-[#cf0060]/10"
-          type="text"
-          name="tmdbId"
-          id="tmdbId"
-          onChange={(event) => {
-            setTmdbId(event.target.value);
-          }}
-          value={tmdbId}
+          type="search"
+          className={inputClassName}
+          placeholder={`Busca ${labels.singular === "juego" ? "un juego" : "una película"} por nombre, o escribe su ID de ${mediaType === "game" ? "IGDB" : "TMDB"}`}
+          aria-label={`Buscar ${labels.singular}`}
+          value={query}
+          maxLength={100}
+          onChange={(event) => setQuery(event.target.value)}
         />
-        <button
-          className="px-4 py-2 bg-[#cf0060] text-white rounded hover:bg-[#ff2a4b] transition-colors cursor-pointer disabled:bg-gray-500 disabled:cursor-not-allowed"
-          disabled={!tmdbId}
-          onClick={handleSetMovie}
-        >
-          Set Current Movie
-        </button>
-      </div>
 
-      <div className="flex flex-col items-center justify-center mt-8 p-6 border border-[#cf0060] rounded-lg">
-        <h2 className="text-4xl font-bold mb-4">Clear Current Movie</h2>
-        <button
-          className="px-4 py-2 bg-[#cf0060] text-white rounded hover:bg-[#ff2a4b] transition-colors"
-          onClick={handleClearMovie}
-        >
-          Clear Current Movie
-        </button>
-      </div>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-bold">Duración (minutos)</span>
+            <input
+              type="number"
+              className={`${inputClassName} w-28`}
+              min={MIN_VOTING_MINUTES}
+              max={MAX_VOTING_MINUTES}
+              value={minutes}
+              onChange={(event) => setMinutes(Number(event.target.value))}
+            />
+          </label>
+          <label className="flex items-center gap-2 pb-2 cursor-pointer">
+            <input type="checkbox" checked={announce} onChange={(event) => setAnnounce(event.target.checked)} />
+            <span className="text-sm">Avisar en el chat</span>
+          </label>
+          {!validMinutes && (
+            <p className="text-sm text-[#ff2a4b] pb-2">
+              Entre {MIN_VOTING_MINUTES} y {MAX_VOTING_MINUTES} minutos.
+            </p>
+          )}
+        </div>
+
+        {typedId !== null && (
+          <button className={`${secondaryButtonClassName} self-start`} disabled={busy || !validMinutes} onClick={() => open(typedId)}>
+            Usar el ID {typedId}
+          </button>
+        )}
+
+        <ul className={`flex flex-col gap-2 transition-opacity ${searching ? "opacity-50" : ""}`}>
+          {query.trim() !== "" &&
+            results.key === searchKey &&
+            results.items.map((item) => (
+              <li key={item.id}>
+                <button
+                  className="w-full flex flex-row items-center gap-3 rounded-lg p-2 border border-[#cf0060]/40 hover:border-[#00fff9] hover:bg-[#00fff9]/5 transition-colors text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={busy || !validMinutes}
+                  onClick={() => open(item.id)}
+                >
+                  <MoviePoster
+                    posterUrl={item.posterUrl ?? ""}
+                    title={item.title}
+                    year={String(item.year ?? "?")}
+                    className="w-12 h-18 shrink-0 rounded"
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-bold text-[#ff2a4b] truncate">
+                      {item.title} ({item.year ?? "?"})
+                    </span>
+                    <span className="block text-sm text-gray-400 truncate">
+                      {[item.creator, item.platforms?.slice(0, 4).join(", ")].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm text-[#00fff9]">Puntuar</span>
+                </button>
+              </li>
+            ))}
+          {query.trim() !== "" && results.key === searchKey && results.items.length === 0 && (
+            <li className="text-stone-500">Sin resultados.</li>
+          )}
+        </ul>
+      </section>
     </div>
   );
 };

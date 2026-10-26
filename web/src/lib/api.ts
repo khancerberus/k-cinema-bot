@@ -1,6 +1,7 @@
 import type { FilmMetadataProps } from "../components/MovieRatingCard";
 import { clearSession, getSession } from "./session";
 import type { MovieSortKey, SortDirection } from "./movie-query";
+import { MEDIA_PATHS, type MediaType } from "../types/channel.type";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -65,11 +66,12 @@ export interface MoviePage {
   totalPages: number;
 }
 
-// Películas puntuadas de un canal. Búsqueda, filtros, orden y paginación los resuelve la API
+// Películas o juegos puntuados de un canal. Búsqueda, filtros, orden y paginación los resuelve la API
 export const fetchRatedMovies = async (
   channelUsername: string,
   query: RatedMoviesQuery = {},
   signal?: AbortSignal,
+  mediaType: MediaType = "movie",
 ): Promise<MoviePage> => {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
@@ -78,7 +80,7 @@ export const fetchRatedMovies = async (
   }
 
   const search = params.size ? `?${params.toString()}` : "";
-  const response = await apiFetch(`${channelPath(channelUsername)}/movies${search}`, { signal });
+  const response = await apiFetch(`${channelPath(channelUsername)}/${MEDIA_PATHS[mediaType].api}${search}`, { signal });
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
