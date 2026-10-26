@@ -1,8 +1,10 @@
 import { Column, DataType, Model, Table } from 'sequelize-typescript';
 import type { MediaType } from '@/channel/channel.settings';
 
-// Índice ligero de TMDB: solo los datos por los que se busca y ordena en SQL.
-// La sinopsis y el póster se quedan en la caché de Redis (MovieService.getCached).
+// Índice ligero de TMDB (películas) e IGDB (juegos): solo los datos por los que se busca y ordena en SQL.
+// La sinopsis y el póster se quedan en la caché de Redis (MovieService / GameService.getCached).
+// En los juegos (mediaType 'game'), tmdbId guarda el ID de IGDB y director la desarrolladora:
+// las columnas no se renombran porque la migración solo puede añadir.
 @Table({
   tableName: 'Movies',
   timestamps: true,

@@ -183,7 +183,7 @@ export class MovieService implements OnApplicationBootstrap {
         `SELECT DISTINCT s."tmdbId"
            FROM "Stars" s
            LEFT JOIN "Movies" m ON m."mediaType" = 'movie' AND m."tmdbId" = s."tmdbId"
-          WHERE m."tmdbId" IS NULL`,
+          WHERE s."mediaType" = 'movie' AND m."tmdbId" IS NULL`,
         { type: QueryTypes.SELECT },
       );
       if (!missing.length) return;

@@ -6,46 +6,53 @@ import { RecentMoviesCarousel } from "../components/RecentMoviesCarousel";
 import { ChannelSettingsCard } from "../components/ChannelSettingsCard";
 import { apiFetch, channelPath, fetchRatedMovies, readApiError, type RatedMoviesQuery } from "../lib/api";
 import { useChannel } from "../lib/channel-context";
-import type { ChannelProfile, ChannelSection } from "../types/channel.type";
+import { MEDIA_LABELS, type ChannelProfile, type ChannelSection, type MediaType } from "../types/channel.type";
 
 // Máximo que admite la API por página
 const MAX_PAGE_SIZE = 100;
+const MEDIA_TYPES: MediaType[] = ["movie", "game"];
 
-const SECTION_SUBTITLES: Record<ChannelSection["kind"], string> = {
-  "top-best": "Las películas con mejor rating promedio",
-  "top-worst": "Las películas con peor rating promedio",
-  recent: "Las películas vistas más recientemente",
+const sectionSubtitle = (section: ChannelSection) => {
+  const { plural } = MEDIA_LABELS[section.mediaType];
+  const article = section.mediaType === "game" ? "Los" : "Las";
+  if (section.kind === "recent") {
+    return `${article} ${plural} ${section.mediaType === "game" ? "jugados" : "vistas"} más recientemente`;
+  }
+  return `${article} ${plural} con ${section.kind === "top-best" ? "mejor" : "peor"} rating promedio`;
 };
+
+// Clave de un elemento oculto: el mismo ID puede ser una película y un juego
+const hiddenKey = (mediaType: MediaType, tmdbId: number) => `${mediaType}:${tmdbId}`;
 
 export const HomePage = () => {
   const { channel, setChannel, isOwner } = useChannel();
-  // Películas de cada sección (id de sección → películas), pedidas ya ordenadas a la API
+  // Elementos de cada sección (id de sección → películas o juegos), pedidos ya ordenados a la API
   const [sectionMovies, setSectionMovies] = useState<Record<string, FilmMetadataProps[]>>({});
-  // Títulos de las películas ocultas, para la lista del editor
-  const [hiddenTitles, setHiddenTitles] = useState<Record<number, string>>({});
+  // Títulos de los ocultos (mediaType:id → título), para la lista del editor
+  const [hiddenTitles, setHiddenTitles] = useState<Record<string, string>>({});
   // Mientras se edita, la página muestra el borrador para ver los cambios al momento
   const [draft, setDraft] = useState<ChannelProfile | null>(null);
   const [saving, setSaving] = useState(false);
 
   const profile = draft ?? channel;
-  const hiddenIds = useMemo(
-    () => new Set(profile.settings.hidden.map((item) => item.tmdbId)),
+  const hiddenKeys = useMemo(
+    () => new Set(profile.settings.hidden.map((item) => hiddenKey(item.mediaType, item.tmdbId))),
     [profile.settings.hidden],
   );
 
-  // Cada top pide su tamaño más la cantidad de ocultas, para seguir lleno al ocultar alguna
+  // Cada top pide su tamaño más la cantidad de ocultos, para seguir lleno al ocultar alguno
   const sectionsKey = JSON.stringify(
-    profile.settings.sections.map((section) => [section.id, section.kind, section.size]),
+    profile.settings.sections.map((section) => [section.id, section.kind, section.size, section.mediaType]),
   );
   const hiddenCount = profile.settings.hidden.length;
 
   useEffect(() => {
     const controller = new AbortController();
-    const sections = JSON.parse(sectionsKey) as Array<[string, ChannelSection["kind"], number]>;
+    const sections = JSON.parse(sectionsKey) as Array<[string, ChannelSection["kind"], number, MediaType]>;
 
     const timer = setTimeout(() => {
       Promise.all(
-        sections.map(async ([id, kind, size]) => {
+        sections.map(async ([id, kind, size, mediaType]) => {
           const query: RatedMoviesQuery =
             kind === "recent"
               ? { sort: "lastWatched", dir: "desc", pageSize: size }
@@ -54,7 +61,7 @@ export const HomePage = () => {
                   dir: kind === "top-best" ? "desc" : "asc",
                   pageSize: Math.min(MAX_PAGE_SIZE, size + hiddenCount),
                 };
-          const page = await fetchRatedMovies(channel.channelUsername, query, controller.signal);
+          const page = await fetchRatedMovies(channel.channelUsername, query, controller.signal, mediaType);
           return [id, page.items] as const;
         }),
       )
@@ -70,19 +77,32 @@ export const HomePage = () => {
     };
   }, [channel.channelUsername, sectionsKey, hiddenCount]);
 
-  // Solo al editar: títulos de las ocultas que no aparecen en ninguna sección
-  const hiddenIdsKey = draft ? draft.settings.hidden.map((item) => item.tmdbId).join(",") : "";
+  // Solo al editar: títulos de los ocultos que no aparecen en ninguna sección
+  const hiddenIdsKey = draft
+    ? draft.settings.hidden.map((item) => hiddenKey(item.mediaType, item.tmdbId)).join(",")
+    : "";
   useEffect(() => {
     if (!hiddenIdsKey) return;
     const controller = new AbortController();
-    const ids = hiddenIdsKey.split(",").map(Number).slice(0, MAX_PAGE_SIZE);
+    const keys = hiddenIdsKey.split(",");
 
-    fetchRatedMovies(channel.channelUsername, { ids, pageSize: ids.length }, controller.signal)
-      .then((page) =>
-        setHiddenTitles(
-          Object.fromEntries(page.items.map((movie) => [movie.tmdbId, `${movie.title} (${movie.year})`])),
-        ),
-      )
+    Promise.all(
+      MEDIA_TYPES.map(async (mediaType) => {
+        const ids = keys
+          .filter((key) => key.startsWith(`${mediaType}:`))
+          .map((key) => Number(key.split(":")[1]))
+          .slice(0, MAX_PAGE_SIZE);
+        if (!ids.length) return [];
+        const page = await fetchRatedMovies(
+          channel.channelUsername,
+          { ids, pageSize: ids.length },
+          controller.signal,
+          mediaType,
+        );
+        return page.items.map((item) => [hiddenKey(mediaType, item.tmdbId), `${item.title} (${item.year})`]);
+      }),
+    )
+      .then((entries) => setHiddenTitles(Object.fromEntries(entries.flat())))
       .catch((error: unknown) => {
         if (!controller.signal.aborted) console.error("Error fetching hidden movies:", error);
       });
@@ -90,13 +110,13 @@ export const HomePage = () => {
     return () => controller.abort();
   }, [channel.channelUsername, hiddenIdsKey]);
 
-  const hide = (tmdbId: number) => {
+  const hide = (mediaType: MediaType, tmdbId: number) => {
     if (!draft) return;
     setDraft({
       ...draft,
       settings: {
         ...draft.settings,
-        hidden: [...draft.settings.hidden, { mediaType: "movie", tmdbId }],
+        hidden: [...draft.settings.hidden, { mediaType, tmdbId }],
       },
     });
   };
@@ -133,18 +153,16 @@ export const HomePage = () => {
     }
   };
 
-  const titleFor = (tmdbId: number) => {
-    const movie = Object.values(sectionMovies)
+  const titleFor = (mediaType: MediaType, tmdbId: number) => {
+    const item = Object.values(sectionMovies)
       .flat()
-      .find((m) => m.tmdbId === tmdbId);
-    return movie ? `${movie.title} (${movie.year})` : (hiddenTitles[tmdbId] ?? `TMDB ${tmdbId}`);
+      .find((m) => m.mediaType === mediaType && m.tmdbId === tmdbId);
+    return item
+      ? `${item.title} (${item.year})`
+      : (hiddenTitles[hiddenKey(mediaType, tmdbId)] ?? `${mediaType === "game" ? "IGDB" : "TMDB"} ${tmdbId}`);
   };
 
-  // Cada tipo de contenido tiene su propio render. Hoy solo existen películas;
-  // series o juegos se añadirán aquí con su mediaType
   const renderSection = (section: ChannelSection) => {
-    if (section.mediaType !== "movie") return null;
-
     if (section.kind === "recent") {
       return (
         <RecentMoviesCarousel
@@ -152,6 +170,7 @@ export const HomePage = () => {
           channelUsername={channel.channelUsername}
           title={section.title}
           movies={(sectionMovies[section.id] ?? []).slice(0, section.size)}
+          mediaType={section.mediaType}
         />
       );
     }
@@ -161,12 +180,13 @@ export const HomePage = () => {
         key={section.id}
         channelUsername={channel.channelUsername}
         title={section.title}
-        subtitle={SECTION_SUBTITLES[section.kind]}
+        subtitle={sectionSubtitle(section)}
         movies={(sectionMovies[section.id] ?? [])
-          .filter((movie) => !hiddenIds.has(movie.tmdbId))
+          .filter((movie) => !hiddenKeys.has(hiddenKey(section.mediaType, movie.tmdbId)))
           .slice(0, section.size)}
         accentColor={section.kind === "top-best" ? "#ffa300" : "#ff2a4b"}
-        onHide={draft ? hide : undefined}
+        onHide={draft ? (tmdbId) => hide(section.mediaType, tmdbId) : undefined}
+        mediaType={section.mediaType}
       />
     );
   };

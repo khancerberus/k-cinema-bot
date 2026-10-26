@@ -38,7 +38,20 @@ export class DatabaseSetupService implements OnModuleInit {
 
     // Crea las tablas que falten (p. ej. Channels). Sin force ni alter: no toca las existentes
     await this.sequelize.sync();
-    await this.enableRowLevelSecurity('Movies');
+    for (const table of [
+      'Movies',
+      'RatingSessions',
+      'StarScores',
+      'StarAppeals',
+    ]) {
+      await this.enableRowLevelSecurity(table);
+    }
+
+    // Como mucho una ventana de votación abierta por canal (evita dos aperturas simultáneas)
+    await this.sequelize.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "rating_sessions_one_open_per_channel"
+          ON "RatingSessions" ("channelId") WHERE "closedAt" IS NULL`,
+    );
 
     if (legacyChannel && legacyChannelId) {
       const [, created] = await Channel.findOrCreate({
@@ -86,6 +99,16 @@ export class DatabaseSetupService implements OnModuleInit {
       this.logger.log('Stars: columna mediaType añadida');
     }
 
+    if (!columns.sessionId) {
+      await queryInterface.addColumn(
+        'Stars',
+        'sessionId',
+        { type: DataTypes.INTEGER, allowNull: true },
+        { transaction },
+      );
+      this.logger.log('Stars: columna sessionId añadida');
+    }
+
     const missing = await this.countWhere(
       'SELECT COUNT(*)::int AS count FROM "Stars" WHERE "channelId" IS NULL',
       transaction,
@@ -121,6 +144,13 @@ export class DatabaseSetupService implements OnModuleInit {
       'Stars',
       'stars_channel_id_tmdb_id',
       ['channelId', 'tmdbId'],
+      false,
+      transaction,
+    );
+    await this.addIndexIfMissing(
+      'Stars',
+      'stars_session_id',
+      ['sessionId'],
       false,
       transaction,
     );

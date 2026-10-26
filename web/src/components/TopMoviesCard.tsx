@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { FilmMetadataProps } from "./MovieRatingCard";
 import { MoviePoster } from "./MoviePoster";
+import { MEDIA_LABELS, itemPath, type MediaType } from "../types/channel.type";
 
 interface TopMoviesCardProps {
   channelUsername: string;
@@ -10,6 +11,7 @@ interface TopMoviesCardProps {
   accentColor: string;
   // Solo en modo edición: muestra el botón para ocultar la película de los tops
   onHide?: (tmdbId: number) => void;
+  mediaType?: MediaType;
 }
 
 export const TopMoviesCard = ({
@@ -19,7 +21,9 @@ export const TopMoviesCard = ({
   movies,
   accentColor,
   onHide,
+  mediaType = "movie",
 }: TopMoviesCardProps) => {
+  const { plural } = MEDIA_LABELS[mediaType];
   return (
     <div className="flex flex-col gap-3 outline-2 outline-[#cf0060] rounded-xl p-4 w-full bg-[#cf0060]/10 shadow-md shadow-[#cf0060]/60">
       <div>
@@ -30,14 +34,14 @@ export const TopMoviesCard = ({
       </div>
 
       {movies.length === 0 ? (
-        <p className="text-stone-500 py-6 text-center">Todavía no hay películas puntuadas.</p>
+        <p className="text-stone-500 py-6 text-center">Todavía no hay {plural} puntuad{mediaType === "game" ? "os" : "as"}.</p>
       ) : (
         <ol className="flex flex-col gap-2">
           {movies.map((movie, index) => (
             <li key={movie.tmdbId} className="flex flex-row items-center gap-2">
               <Link
                 className="flex flex-1 min-w-0 flex-row items-center gap-3 rounded-lg p-2 border border-transparent hover:border-[#00fff9]/60 hover:bg-[#00fff9]/5 transition-colors duration-300"
-                to={`/${channelUsername}/rated-movies/movie/${movie.tmdbId}`}
+                to={itemPath(channelUsername, movie.mediaType, movie.tmdbId)}
               >
                 <span
                   className="w-8 shrink-0 text-center text-4xl font-bebaskai"

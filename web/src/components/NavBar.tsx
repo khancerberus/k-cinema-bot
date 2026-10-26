@@ -30,9 +30,12 @@ export const NavBar = ({ channel, isOwner }: NavBarProps) => {
         <Link to={`${base}/rated-movies`} className="text-white hover:text-[#ffa300]">
           Rated Movies
         </Link>
+        <Link to={`${base}/rated-games`} className="text-white hover:text-[#ffa300]">
+          Rated Games
+        </Link>
         {isOwner && (
           <Link to={`${base}/current-movie`} className="text-white hover:text-[#ffa300]">
-            Current Movie
+            Votación
           </Link>
         )}
       </div>

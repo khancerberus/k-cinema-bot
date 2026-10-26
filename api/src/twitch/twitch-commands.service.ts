@@ -10,13 +10,21 @@ import { TwitchChatService } from './twitch-chat.service';
 import { RecommendationService } from '@/recommendation/recommendation.service';
 import { StarService } from '@/star/star.service';
 import {
-  CurrentMovieService,
+  RatingSessionService,
   type MovieActionResult,
-} from '@/star/current-movie.service';
+} from '@/star/rating-session.service';
+import { AppealService } from '@/star/appeal.service';
 import { ChannelService } from '@/channel/channel.service';
 import type { Channel } from '@/channel/channel.model';
-import { extractTmdbId } from '@/utils/url-decoder.utils';
-import { buildKcinemaMessage } from '@/channel/channel.settings';
+import { CatalogService } from '@/movie/catalog.service';
+import {
+  buildKcinemaMessage,
+  type MediaType,
+} from '@/channel/channel.settings';
+import { parseItemReference, parseKCommand } from '@/star/star-input';
+
+const K_USAGE =
+  'Uso: !k movie|game <ID, URL o nombre> [15m] · !k close · !k extend 5m · !k aprobar|rechazar @usuario';
 
 // Tiempo mínimo entre respuestas a !kcinema en un mismo canal (evita spam)
 const KCINEMA_COOLDOWN_MS = 30_000;
@@ -35,8 +43,12 @@ export class TwitchCommandsService implements OnModuleInit {
   private readonly commands: Record<string, CommandHandler> = {
     '!rec': (channel, tags, args) => this.recommend(channel, tags, args),
     '!star': (channel, tags, args) => this.submitStar(channel, tags, args),
-    '!setmovie': (channel, tags, args) => this.setMovie(channel, tags, args),
-    '!clearmovie': (channel, tags) => this.clearMovie(channel, tags),
+    '!apelar': (channel, tags, args) => this.appeal(channel, tags, args),
+    '!k': (channel, tags, args) => this.k(channel, tags, args),
+    // Alias anteriores a !k
+    '!setmovie': (channel, tags, args) =>
+      this.k(channel, tags, ['movie', ...args]),
+    '!clearmovie': (channel, tags) => this.k(channel, tags, ['close']),
     '!kcinema': (channel, tags, args) => this.kcinema(channel, tags, args),
   };
 
@@ -47,7 +59,9 @@ export class TwitchCommandsService implements OnModuleInit {
     private readonly twitchChat: TwitchChatService,
     private readonly recommendationService: RecommendationService,
     private readonly starService: StarService,
-    private readonly currentMovieService: CurrentMovieService,
+    private readonly ratingSessionService: RatingSessionService,
+    private readonly appealService: AppealService,
+    private readonly catalog: CatalogService,
     private readonly channelService: ChannelService,
     private readonly config: ConfigService,
   ) {}
@@ -137,100 +151,123 @@ export class TwitchCommandsService implements OnModuleInit {
     args: string[],
   ) {
     const displayName = this.displayName(tags);
-    const stars = Number(args[0]);
 
-    if (
-      !args[0] ||
-      isNaN(stars) ||
-      stars < 0.5 ||
-      stars > 5 ||
-      stars % 0.5 !== 0
-    ) {
-      await this.twitchChat.say(
-        channel.channelUsername,
-        `Disculpa ${displayName}, por favor proporciona un número del 0.5 al 5 y sus intermedios.`,
-      );
-      return;
-    }
-
+    // La validación depende de las categorías de la votación abierta: la hace el servicio
     await this.reply(
       channel,
       async () =>
         (
-          await this.starService.submitStar({
-            channelId: channel.channelId,
-            userId: Number(tags['user-id']),
-            username: displayName,
-            stars,
-          })
+          await this.starService.submitStar(
+            channel,
+            { userId: Number(tags['user-id']), username: displayName },
+            args,
+          )
         ).message,
       `Disculpa ${displayName}, hubo un error al enviar tu calificación.`,
     );
   }
 
-  private async setMovie(
-    channel: Channel,
-    tags: ChatUserstate,
-    args: string[],
-  ) {
+  private async appeal(channel: Channel, tags: ChatUserstate, args: string[]) {
     const displayName = this.displayName(tags);
-
-    if (!args.length) {
-      await this.twitchChat.say(
-        channel.channelUsername,
-        `Disculpa ${displayName}, por favor proporciona la url de tmdb de la película.`,
-      );
-      return;
-    }
-
-    if (!this.isModerator(channel, tags)) {
-      await this.twitchChat.say(
-        channel.channelUsername,
-        `Disculpa ${displayName}, solo el streamer o los mods puede usar este comando.`,
-      );
-      return;
-    }
-
-    // Acepta un TMDB ID o una URL de themoviedb.org
-    const tmdbId = /^\d+$/.test(args[0])
-      ? Number(args[0])
-      : extractTmdbId(args[0]);
-
-    if (!tmdbId) {
-      await this.twitchChat.say(
-        channel.channelUsername,
-        `Disculpa ${displayName}, no pude obtener el TMDB ID de "${args[0]}".`,
-      );
-      return;
-    }
 
     await this.reply(
       channel,
       () =>
-        this.currentMovieService.setCurrentMovie(channel, {
-          tmdbId,
-          announce: true,
-        }),
-      `Disculpa ${displayName}, hubo un error al actualizar la película.`,
+        this.appealService.request(
+          channel,
+          { userId: Number(tags['user-id']), username: displayName },
+          args,
+        ),
+      `Disculpa ${displayName}, hubo un error al registrar tu apelación.`,
     );
   }
 
-  private async clearMovie(channel: Channel, tags: ChatUserstate) {
+  // !k: comandos del streamer y los mods para la votación
+  private async k(channel: Channel, tags: ChatUserstate, args: string[]) {
     const displayName = this.displayName(tags);
 
     if (!this.isModerator(channel, tags)) {
       await this.twitchChat.say(
         channel.channelUsername,
-        `Disculpa ${displayName}, solo el streamer o los mods puede usar este comando.`,
+        `Disculpa ${displayName}, solo el streamer o los mods pueden usar este comando.`,
       );
       return;
     }
 
-    await this.reply(
-      channel,
-      () => this.currentMovieService.clearCurrentMovie(channel, true),
-      `Disculpa ${displayName}, hubo un error al cerrar la puntuación.`,
-    );
+    const command = parseKCommand(args);
+    switch (command.action) {
+      case 'help':
+        await this.twitchChat.say(
+          channel.channelUsername,
+          `@${displayName}, ${K_USAGE}`,
+        );
+        return;
+
+      case 'open':
+        await this.reply(
+          channel,
+          () =>
+            this.openContent(
+              channel,
+              command.mediaType,
+              command.query,
+              command.minutes,
+            ),
+          `Disculpa ${displayName}, hubo un error al activar el contenido.`,
+        );
+        return;
+
+      case 'close':
+        await this.reply(
+          channel,
+          () => this.ratingSessionService.close(channel, true),
+          `Disculpa ${displayName}, hubo un error al cerrar la puntuación.`,
+        );
+        return;
+
+      case 'extend':
+        await this.reply(
+          channel,
+          () => this.ratingSessionService.extend(channel, command.minutes),
+          `Disculpa ${displayName}, no se pudo alargar la votación.`,
+        );
+        return;
+
+      case 'approve':
+      case 'reject':
+        await this.reply(
+          channel,
+          () =>
+            this.appealService.resolve(
+              channel,
+              command.username,
+              command.action === 'approve',
+              displayName,
+            ),
+          `Disculpa ${displayName}, no se pudo resolver la apelación.`,
+        );
+        return;
+    }
+  }
+
+  private async openContent(
+    channel: Channel,
+    mediaType: MediaType,
+    query: string,
+    minutes?: number,
+  ): Promise<string | MovieActionResult> {
+    const reference = parseItemReference(mediaType, query);
+    const info = reference
+      ? await this.catalog.resolve(mediaType, reference)
+      : null;
+    if (!info) {
+      const kind = mediaType === 'game' ? 'ningún juego' : 'ninguna película';
+      return `No encontré ${kind} con "${query}". Prueba con el ID o la URL de ${mediaType === 'game' ? 'IGDB' : 'TMDB'}.`;
+    }
+    return this.ratingSessionService.open(channel, info, {
+      minutes,
+      announce: true,
+    });
   }
 
   // !kcinema → enlace al perfil del canal en la web

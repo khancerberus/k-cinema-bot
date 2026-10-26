@@ -13,16 +13,25 @@ import type {
   VerifiedIdentity,
 } from './channel.dto';
 import {
+  CATEGORY_KEY_PATTERN,
   ChannelCommands,
   ChannelSettings,
   DEFAULT_KCINEMA_MESSAGE,
+  MAX_CATEGORIES,
+  MAX_CATEGORY_LABEL_LENGTH,
   MAX_KCINEMA_MESSAGE_LENGTH,
   MAX_SECTION_SIZE,
+  MAX_VOTING_MINUTES,
   MEDIA_TYPES,
   MIN_SECTION_SIZE,
+  MIN_VOTING_MINUTES,
+  type MediaType,
+  type RatingCategory,
+  type RatingSettings,
   SECTION_KINDS,
   defaultChannelCommands,
   defaultChannelSettings,
+  resolveSettings,
 } from './channel.settings';
 import { TwitchChatService } from '@/twitch/twitch-chat.service';
 
@@ -51,10 +60,7 @@ export class ChannelService {
       displayName: channel.displayName,
       description: channel.description,
       accentColor: channel.accentColor,
-      settings: {
-        ...channel.settings,
-        commands: channel.settings.commands ?? defaultChannelCommands(),
-      },
+      settings: resolveSettings(channel.settings),
     };
   }
 
@@ -158,7 +164,7 @@ export class ChannelService {
     }
 
     if (body.settings !== undefined) {
-      channel.settings = this.validateSettings(body.settings);
+      channel.settings = this.validateSettings(body.settings, channel.settings);
     }
 
     await channel.save();
@@ -183,7 +189,10 @@ export class ChannelService {
     return this.channelModel.findAll({ where: { platform } });
   }
 
-  private validateSettings(settings: ChannelSettings): ChannelSettings {
+  private validateSettings(
+    settings: ChannelSettings,
+    previous: ChannelSettings,
+  ): ChannelSettings {
     if (!settings || !Array.isArray(settings.sections)) {
       throw new BadRequestException('La configuración no es válida.');
     }
@@ -230,9 +239,22 @@ export class ChannelService {
       throw new BadRequestException('Hay demasiadas películas ocultas.');
     }
 
+    const resolvedPrevious = resolveSettings(previous);
+
     return {
       sections,
       commands: this.validateCommands(settings.commands),
+      rating: this.validateRating(settings.rating, resolvedPrevious.rating),
+      voting: settings.voting
+        ? {
+            defaultMinutes: this.validateMinutes(
+              settings.voting.defaultMinutes,
+            ),
+          }
+        : resolvedPrevious.voting,
+      appeals: settings.appeals
+        ? { enabled: settings.appeals.enabled === true }
+        : resolvedPrevious.appeals,
       hidden: hidden.map((item) => {
         const tmdbId = Number(item?.tmdbId);
         if (
@@ -245,6 +267,78 @@ export class ChannelService {
         return { mediaType: item.mediaType, tmdbId };
       }),
     };
+  }
+
+  private validateMinutes(value: unknown) {
+    const minutes = Number(value);
+    if (
+      !Number.isInteger(minutes) ||
+      minutes < MIN_VOTING_MINUTES ||
+      minutes > MAX_VOTING_MINUTES
+    ) {
+      throw new BadRequestException(
+        `La duración de la votación debe estar entre ${MIN_VOTING_MINUTES} y ${MAX_VOTING_MINUTES} minutos.`,
+      );
+    }
+    return minutes;
+  }
+
+  // Las categorías que ya existían nunca desaparecen: si no vienen, quedan archivadas
+  // (los votos antiguos las siguen usando)
+  private validateRating(
+    rating: RatingSettings | undefined,
+    previous: RatingSettings,
+  ): RatingSettings {
+    if (!rating?.categories) return previous;
+
+    const categories = Object.fromEntries(
+      MEDIA_TYPES.map((mediaType): [MediaType, RatingCategory[]] => {
+        const raw = rating.categories[mediaType];
+        if (raw !== undefined && !Array.isArray(raw)) {
+          throw new BadRequestException('Las categorías no son válidas.');
+        }
+
+        const list = (raw ?? previous.categories[mediaType]).map(
+          (category): RatingCategory => {
+            const key = String(category?.key ?? '');
+            const label = String(category?.label ?? '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            if (!CATEGORY_KEY_PATTERN.test(key)) {
+              throw new BadRequestException(
+                `La categoría "${label || key}" no tiene una clave válida.`,
+              );
+            }
+            if (label.length < 1 || label.length > MAX_CATEGORY_LABEL_LENGTH) {
+              throw new BadRequestException(
+                `El nombre de cada categoría debe tener entre 1 y ${MAX_CATEGORY_LABEL_LENGTH} caracteres.`,
+              );
+            }
+            return category.archived
+              ? { key, label, archived: true }
+              : { key, label };
+          },
+        );
+
+        const keys = new Set(list.map((category) => category.key));
+        if (keys.size !== list.length) {
+          throw new BadRequestException('Hay categorías repetidas.');
+        }
+        for (const old of previous.categories[mediaType]) {
+          if (!keys.has(old.key)) list.push({ ...old, archived: true });
+        }
+        if (
+          list.filter((category) => !category.archived).length > MAX_CATEGORIES
+        ) {
+          throw new BadRequestException(
+            `Puede haber como mucho ${MAX_CATEGORIES} categorías activas.`,
+          );
+        }
+        return [mediaType, list];
+      }),
+    ) as Record<MediaType, RatingCategory[]>;
+
+    return { categories };
   }
 
   private validateCommands(

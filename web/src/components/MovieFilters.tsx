@@ -2,12 +2,14 @@ import {
   emptyMovieFilters,
   type MovieFilterValues,
 } from "../lib/movie-query";
+import type { MediaType } from "../types/channel.type";
 
 interface MovieFiltersProps {
   filters: MovieFilterValues;
   onChange: (filters: MovieFilterValues) => void;
   // null mientras se espera la respuesta de la API
   resultCount: number | null;
+  mediaType?: MediaType;
 }
 
 const inputClassName =
@@ -17,7 +19,9 @@ export const MovieFilters = ({
   filters,
   onChange,
   resultCount,
+  mediaType = "movie",
 }: MovieFiltersProps) => {
+  const isGame = mediaType === "game";
   const updateFilter = (key: keyof MovieFilterValues, value: string) => {
     onChange({ ...filters, [key]: value });
   };
@@ -93,7 +97,7 @@ export const MovieFilters = ({
         </fieldset>
 
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-md font-bold mb-2">Año de la película</legend>
+          <legend className="text-md font-bold mb-2">{isGame ? "Año del juego" : "Año de la película"}</legend>
           <div className="flex flex-row items-center gap-2">
             <input
               type="number"
@@ -126,7 +130,13 @@ export const MovieFilters = ({
         ) : (
           <>
             <span className="font-bold">{resultCount}</span>{" "}
-            {resultCount === 1 ? "película encontrada" : "películas encontradas"}
+            {isGame
+              ? resultCount === 1
+                ? "juego encontrado"
+                : "juegos encontrados"
+              : resultCount === 1
+                ? "película encontrada"
+                : "películas encontradas"}
           </>
         )}
       </p>

@@ -1,7 +1,8 @@
 // Estado de búsqueda, filtros, orden y página de Rated Movies. Vive en la URL (?q=&page=...)
 // para poder compartir el enlace y usar "atrás"; la API hace todo el trabajo.
 
-export type MovieSortKey = "title" | "rating" | "lastWatched" | "year";
+// cat:<key> ordena por el promedio de una categoría (juegos)
+export type MovieSortKey = "title" | "rating" | "lastWatched" | "year" | `cat:${string}`;
 export type SortDirection = "asc" | "desc";
 
 export interface MovieSortValue {
@@ -49,7 +50,7 @@ export const readRatedMoviesState = (params: URLSearchParams): RatedMoviesState 
     q: params.get("q") ?? "",
     page: Number.isInteger(page) && page > 0 ? page : 1,
     sort:
-      sortKey && SORT_KEYS.includes(sortKey)
+      sortKey && (SORT_KEYS.includes(sortKey) || /^cat:[a-z0-9_-]{1,20}$/.test(sortKey))
         ? { key: sortKey, direction: direction === "asc" ? "asc" : "desc" }
         : defaultMovieSort,
     filters: Object.fromEntries(

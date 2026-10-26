@@ -2,13 +2,19 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Injectable,
   Param,
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
 import { StarService } from './star.service';
 import { ChannelService } from '@/channel/channel.service';
-import { MOVIE_SORT_KEYS, type MovieListQuery } from './star.dto';
+import {
+  CATEGORY_SORT_PATTERN,
+  MOVIE_SORT_KEYS,
+  type MovieListQuery,
+} from './star.dto';
+import type { MediaType } from '@/channel/channel.settings';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -56,7 +62,10 @@ const parseMovieListQuery = (
     ]),
   );
   const sort = raw.sort ?? 'lastWatched';
-  if (!(MOVIE_SORT_KEYS as readonly string[]).includes(sort)) {
+  if (
+    !(MOVIE_SORT_KEYS as readonly string[]).includes(sort) &&
+    !CATEGORY_SORT_PATTERN.test(sort)
+  ) {
     throw new BadRequestException('El parámetro sort no es válido.');
   }
   const dir = raw.dir ?? 'desc';
@@ -98,9 +107,12 @@ const parseMovieListQuery = (
   };
 };
 
-// Ratings públicos de un canal. Las estrellas se envían desde el chat (!star)
-@Controller('channels/:channel/movies')
-export class StarController {
+// Ratings públicos de un canal. Las estrellas se envían desde el chat (!star).
+// @Injectable() hace que TypeScript emita los tipos del constructor que heredan las subclases
+@Injectable()
+abstract class RatedItemsController {
+  protected abstract readonly mediaType: MediaType;
+
   constructor(
     private readonly starService: StarService,
     private readonly channelService: ChannelService,
@@ -114,7 +126,8 @@ export class StarController {
   ) {
     const channel = await this.channelService.getByUsername(channelUsername);
     return this.starService.getMovies(
-      channel.channelId,
+      channel,
+      this.mediaType,
       parseMovieListQuery(query),
     );
   }
@@ -125,6 +138,17 @@ export class StarController {
     @Param('tmdbId', ParseIntPipe) tmdbId: number,
   ) {
     const channel = await this.channelService.getByUsername(channelUsername);
-    return this.starService.getMovieDetails(channel.channelId, tmdbId);
+    return this.starService.getMovieDetails(channel, this.mediaType, tmdbId);
   }
+}
+
+@Controller('channels/:channel/movies')
+export class StarController extends RatedItemsController {
+  protected readonly mediaType = 'movie';
+}
+
+// En los juegos, :tmdbId es el ID de IGDB
+@Controller('channels/:channel/games')
+export class GameController extends RatedItemsController {
+  protected readonly mediaType = 'game';
 }

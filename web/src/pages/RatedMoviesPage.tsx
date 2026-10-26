@@ -13,6 +13,7 @@ import {
   type MovieSortValue,
   type RatedMoviesState,
 } from "../lib/movie-query";
+import { MEDIA_LABELS, type MediaType } from "../types/channel.type";
 import "../index.css";
 
 const PAGE_SIZE = 20;
@@ -27,8 +28,14 @@ const endOfDay = (date: string) => (date ? new Date(`${date}T23:59:59.999`).toIS
 const inputClassName =
   "w-full bg-[#000117] border border-[#cf0060]/60 rounded px-3 py-2 text-gray-300 focus:outline-none focus:border-[#00fff9]";
 
-function RatedMoviesPage() {
+const PAGE_TITLES: Record<MediaType, string> = { movie: "Rated Movies", game: "Rated Games" };
+
+// Lista de películas o juegos puntuados de un canal
+export function RatedItemsPage({ mediaType }: { mediaType: MediaType }) {
   const { channel } = useChannel();
+  const labels = MEDIA_LABELS[mediaType];
+  // Juegos: también se puede ordenar por el promedio de cada categoría activa
+  const sortCategories = channel.settings.rating.categories[mediaType].filter((category) => !category.archived);
   const [searchParams, setSearchParams] = useSearchParams();
   const state = readRatedMoviesState(searchParams);
   const requestKey = `${channel.channelUsername}?${searchParams.toString()}`;
@@ -85,6 +92,7 @@ function RatedMoviesPage() {
           maxYear: filters.maxYear,
         },
         controller.signal,
+        mediaType,
       )
         .then((data) => setResult({ key: requestKey, data, error: false }))
         .catch((error: unknown) => {
@@ -98,7 +106,7 @@ function RatedMoviesPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [channel.channelUsername, searchParams, requestKey]);
+  }, [channel.channelUsername, searchParams, requestKey, mediaType]);
 
   const changePage = (page: number) => {
     update({ page }, true);
@@ -111,15 +119,15 @@ function RatedMoviesPage() {
   return (
     <div>
       <header className="flex items-center justify-center p-5">
-        <h1 className="text-8xl font-bold mb-4 font-bebaskai">Rated Movies</h1>
+        <h1 className="text-8xl font-bold mb-4 font-bebaskai">{PAGE_TITLES[mediaType]}</h1>
       </header>
 
       <div className="flex flex-col items-center gap-4 px-8 py-4 w-full xl:w-300 mx-auto">
         <input
           type="search"
           className={inputClassName}
-          placeholder="Buscar por título, director o año..."
-          aria-label="Buscar películas"
+          placeholder={`Buscar por título, ${labels.creator.toLowerCase()} o año...`}
+          aria-label={`Buscar ${labels.plural}`}
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           maxLength={100}
@@ -129,9 +137,15 @@ function RatedMoviesPage() {
           filters={state.filters}
           onChange={(filters: MovieFilterValues) => update({ filters })}
           resultCount={loading ? null : (result.data?.total ?? 0)}
+          mediaType={mediaType}
         />
 
-        <MovieSort sort={state.sort} onChange={(sort: MovieSortValue) => update({ sort })} />
+        <MovieSort
+          sort={state.sort}
+          onChange={(sort: MovieSortValue) => update({ sort })}
+          categories={sortCategories}
+          mediaType={mediaType}
+        />
 
         <div className={`flex flex-col gap-4 w-full transition-opacity ${loading ? "opacity-50" : ""}`}>
           {movies.map((movie) => (
@@ -140,12 +154,14 @@ function RatedMoviesPage() {
         </div>
 
         {!loading && result.error && (
-          <p className="text-stone-500 py-8">No se pudieron cargar las películas. Inténtalo de nuevo.</p>
+          <p className="text-stone-500 py-8">No se pudieron cargar {labels.plural === "juegos" ? "los" : "las"} {labels.plural}. Inténtalo de nuevo.</p>
         )}
 
         {!loading && !result.error && movies.length === 0 && (
           <p className="text-stone-500 py-8">
-            {hasFilters ? "Ninguna película coincide con la búsqueda." : "Este canal aún no tiene películas puntuadas."}
+            {hasFilters
+              ? `Ningún resultado coincide con la búsqueda.`
+              : `Este canal aún no tiene ${labels.plural} puntuad${mediaType === "game" ? "os" : "as"}.`}
           </p>
         )}
 
@@ -157,6 +173,14 @@ function RatedMoviesPage() {
       </div>
     </div>
   );
+}
+
+function RatedMoviesPage() {
+  return <RatedItemsPage mediaType="movie" />;
+}
+
+export function RatedGamesPage() {
+  return <RatedItemsPage mediaType="game" />;
 }
 
 export default RatedMoviesPage;

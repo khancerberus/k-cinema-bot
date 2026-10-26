@@ -1,42 +1,49 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
-  CreateStarDto,
-  MovieListQuery,
-  MoviePage,
-  MovieSortKey,
-  SubmitStarDto,
+  CATEGORY_SORT_PATTERN,
+  type ChatVoter,
+  type MovieListQuery,
+  type MoviePage,
 } from './star.dto';
 import { UserService } from '@/user/user.service';
-import { CurrentMovieService } from './current-movie.service';
 import { InjectConnection, InjectModel } from '@nestjs/sequelize';
 import { Star } from './star.model';
-import { Op, QueryTypes } from 'sequelize';
+import { StarScore } from './star-score.model';
+import { QueryTypes } from 'sequelize';
 import { Sequelize } from 'sequelize-typescript';
+import { CatalogService, mediaLabel } from '@/movie/catalog.service';
+import type { Channel } from '@/channel/channel.model';
+import { resolveSettings, type MediaType } from '@/channel/channel.settings';
 import {
-  MovieService,
-  directorsOf,
-  releaseYearOf,
-  type CachedMovie,
-} from '@/movie/movie.service';
+  RatingSessionService,
+  sessionStarsWhere,
+} from './rating-session.service';
+import { formatScores, parseScores, type ScoreCategory } from './star-input';
+
+export interface CategoryAverage {
+  key: string;
+  label: string;
+  average: number;
+}
 
 export interface MovieStar {
+  mediaType: MediaType;
   tmdbId: number;
   title: string;
   year: string;
+  // Directores (películas) o desarrolladoras (juegos)
   director: string;
   synopsis: string;
   rating: number;
   lastWatched: Date;
   posterUrl: string;
-}
-
-export interface StarRecord {
-  tmdbId: number;
-  score: number;
-  createdAt: Date;
+  sourceUrl: string | null;
+  // Promedio de cada categoría (vacío si el contenido se puntúa con una sola nota)
+  categories: CategoryAverage[];
 }
 
 export interface MovieDetailResponse {
+  mediaType: MediaType;
   tmdbId: number;
   title: string;
   year: string;
@@ -45,16 +52,23 @@ export interface MovieDetailResponse {
   synopsis: string;
   lastWatched: string;
   posterUrl: string;
+  sourceUrl: string | null;
+  platforms: string[];
+  genres: string[];
+  // Solo juegos: año del acceso anticipado, si lo hubo antes del 1.0
+  earlyAccessYear: number | null;
+  categories: CategoryAverage[];
   stars: Array<{
     username: string;
     score: number;
+    // categoryKey → nota
+    scores: Record<string, number>;
     createdAt: Date;
   }>;
 }
 
 export interface SubmitStarResponse {
   message: string;
-  currentMovie: Record<string, unknown>;
   stars: number;
 }
 
@@ -70,7 +84,7 @@ interface RatedMovieRow {
 }
 
 // Columnas por las que se puede ordenar (lista blanca: nunca se interpola texto del usuario)
-const SORT_COLUMNS: Record<MovieSortKey, string> = {
+const SORT_COLUMNS: Record<string, string> = {
   title: 'lower(m."title")',
   rating: 'agg."rating"',
   lastWatched: 'agg."lastWatched"',
@@ -90,37 +104,42 @@ const SEARCH_COLUMNS = [
 // Los comodines de LIKE escritos por el usuario se buscan literalmente
 const escapeLike = (text: string) => text.replace(/[!%_]/g, (c) => `!${c}`);
 
-const posterUrlOf = (movie: CachedMovie | null | undefined) =>
-  movie?.poster_path
-    ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-    : 'No poster available';
+const NO_POSTER = 'No poster available';
+
+// Etiquetas de las categorías del canal, incluidas las archivadas (los votos antiguos las usan)
+const categoryLabels = (channel: Channel, mediaType: MediaType) =>
+  resolveSettings(channel.settings).rating.categories[mediaType];
 
 @Injectable()
 export class StarService {
   constructor(
     @InjectModel(Star)
     private starModel: typeof Star,
+    @InjectModel(StarScore)
+    private starScoreModel: typeof StarScore,
     @InjectConnection() private readonly sequelize: Sequelize,
-    private readonly currentMovieService: CurrentMovieService,
+    private readonly ratingSessionService: RatingSessionService,
     private readonly userService: UserService,
-    private readonly movieService: MovieService,
+    private readonly catalog: CatalogService,
   ) {}
 
-  async createStar(starData: CreateStarDto) {
-    return this.starModel.create(starData);
-  }
-
-  async getStarsByMovie(channelId: string, tmdbId: number) {
+  async getStarsByItem(
+    channelId: string,
+    mediaType: MediaType,
+    tmdbId: number,
+  ) {
     return this.starModel.findAll({
-      where: { channelId, tmdbId },
+      where: { channelId, mediaType, tmdbId },
+      include: [StarScore],
       order: [['createdAt', 'DESC']],
     });
   }
 
-  // Películas puntuadas de un canal: filtra, busca, ordena y pagina en la base de datos.
-  // Solo las películas de la página piden sinopsis y póster a Redis.
+  // Contenido puntuado de un canal: filtra, busca, ordena y pagina en la base de datos.
+  // Solo los de la página piden sinopsis y póster a Redis.
   async getMovies(
-    channelId: string,
+    channel: Channel,
+    mediaType: MediaType,
     query: MovieListQuery,
   ): Promise<MoviePage<MovieStar>> {
     const emptyPage = {
@@ -132,7 +151,8 @@ export class StarService {
     };
     const conditions: string[] = [];
     const replacements: Record<string, unknown> = {
-      channelId,
+      channelId: channel.channelId,
+      mediaType,
       limit: query.pageSize,
       offset: (query.page - 1) * query.pageSize,
     };
@@ -165,6 +185,13 @@ export class StarService {
       conditions.push('agg."tmdbId" IN (:ids)');
     }
 
+    // Orden por una categoría: su promedio se calcula aparte y se une por tmdbId
+    const sortCategory = CATEGORY_SORT_PATTERN.exec(query.sort)?.[1];
+    if (sortCategory) replacements.sortCategory = sortCategory;
+    const sortColumn = sortCategory
+      ? 'cat."average"'
+      : SORT_COLUMNS[query.sort];
+
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const direction = query.dir === 'asc' ? 'ASC' : 'DESC';
     const fromRatedMovies = (select: string) => `
@@ -173,12 +200,24 @@ export class StarService {
                ROUND(AVG("score")::numeric, 1)::float AS "rating",
                MAX("createdAt") AS "lastWatched"
           FROM "Stars"
-         WHERE "channelId" = :channelId
+         WHERE "channelId" = :channelId AND "mediaType" = :mediaType
          GROUP BY "tmdbId"
-      )
+      )${
+        sortCategory
+          ? `, cat AS (
+        SELECT s."tmdbId", AVG(ss."score") AS "average"
+          FROM "Stars" s
+          JOIN "StarScores" ss ON ss."starId" = s."id"
+         WHERE s."channelId" = :channelId AND s."mediaType" = :mediaType
+           AND ss."categoryKey" = :sortCategory
+         GROUP BY s."tmdbId"
+      )`
+          : ''
+      }
       SELECT ${select}
         FROM agg
-        LEFT JOIN "Movies" m ON m."mediaType" = 'movie' AND m."tmdbId" = agg."tmdbId"
+        LEFT JOIN "Movies" m ON m."mediaType" = :mediaType AND m."tmdbId" = agg."tmdbId"
+        ${sortCategory ? 'LEFT JOIN cat ON cat."tmdbId" = agg."tmdbId"' : ''}
       ${where}`;
 
     const rows = await this.sequelize.query<RatedMovieRow>(
@@ -186,7 +225,7 @@ export class StarService {
          agg."tmdbId", agg."rating", agg."lastWatched",
          m."title", m."releaseYear", m."director", m."updatedAt" AS "metadataUpdatedAt",
          COUNT(*) OVER()::int AS "total"`)}
-       ORDER BY ${SORT_COLUMNS[query.sort]} ${direction} NULLS LAST, agg."tmdbId" ${direction}
+       ORDER BY ${sortColumn} ${direction} NULLS LAST, agg."tmdbId" ${direction}
        LIMIT :limit OFFSET :offset`,
       { replacements, type: QueryTypes.SELECT },
     );
@@ -208,29 +247,36 @@ export class StarService {
       };
 
     const tmdbIds = rows.map((row) => Number(row.tmdbId));
-    const details = await this.movieService.getCachedMany(tmdbIds);
+    const [details, categories] = await Promise.all([
+      this.catalog.getInfoMany(mediaType, tmdbIds),
+      this.categoryAverages(channel, mediaType, tmdbIds),
+    ]);
 
-    // Películas sin fila en Movies o con datos de más de 30 días: se actualizan tras responder
-    this.movieService.syncMetadataInBackground(
+    // Sin fila en Movies o con datos de más de 30 días: se actualizan tras responder
+    this.catalog.syncMetadataInBackground(
+      mediaType,
       rows
-        .filter((row) => this.movieService.isStale(row.metadataUpdatedAt))
+        .filter((row) => this.catalog.isStale(row.metadataUpdatedAt))
         .map((row) => Number(row.tmdbId)),
     );
 
     const items = rows.map((row): MovieStar => {
       const tmdbId = Number(row.tmdbId);
-      const movie = details.get(tmdbId);
-      const year = row.releaseYear ?? releaseYearOf(movie ?? null);
+      const info = details.get(tmdbId);
+      const year = row.releaseYear ?? info?.year;
 
       return {
+        mediaType,
         tmdbId,
-        title: row.title || movie?.title || 'Unknown',
+        title: row.title || info?.title || 'Unknown',
         year: year ? String(year) : 'Unknown',
-        director: row.director || directorsOf(movie).join(', ') || 'Unknown',
+        director: row.director || info?.creator || 'Unknown',
         rating: Number(row.rating),
-        synopsis: movie?.overview || 'No synopsis available',
+        synopsis: info?.synopsis || 'No synopsis available',
         lastWatched: row.lastWatched,
-        posterUrl: posterUrlOf(movie),
+        posterUrl: info?.posterUrl ?? NO_POSTER,
+        sourceUrl: info?.sourceUrl ?? null,
+        categories: categories.get(tmdbId) ?? [],
       };
     });
 
@@ -243,17 +289,24 @@ export class StarService {
     };
   }
 
-  async getMovieDetails(channelId: string, tmdbId: number) {
-    const movieDetail = await this.movieService.getCached(tmdbId);
-    const stars = await this.getStarsByMovie(channelId, tmdbId);
-    const users = await this.userService.getAll();
-    const year = releaseYearOf(movieDetail);
+  async getMovieDetails(
+    channel: Channel,
+    mediaType: MediaType,
+    tmdbId: number,
+  ): Promise<MovieDetailResponse> {
+    const [info, stars, users, categories] = await Promise.all([
+      this.catalog.getInfo(mediaType, tmdbId),
+      this.getStarsByItem(channel.channelId, mediaType, tmdbId),
+      this.userService.getAll(),
+      this.categoryAverages(channel, mediaType, [tmdbId]),
+    ]);
 
     return {
+      mediaType,
       tmdbId,
-      title: movieDetail?.title || 'Unknown',
-      year: year ? String(year) : 'Unknown',
-      director: directorsOf(movieDetail).join(', ') || 'Unknown',
+      title: info?.title || 'Unknown',
+      year: info?.year ? String(info.year) : 'Unknown',
+      director: info?.creator || 'Unknown',
       rating:
         stars.length > 0
           ? Number(
@@ -263,7 +316,7 @@ export class StarService {
               ).toFixed(1),
             )
           : 0,
-      synopsis: movieDetail?.overview || 'No synopsis available',
+      synopsis: info?.synopsis || 'No synopsis available',
       lastWatched:
         stars.length > 0
           ? stars[0].createdAt.toLocaleDateString('es-ES', {
@@ -272,77 +325,144 @@ export class StarService {
               year: '2-digit',
             })
           : 'Unknown',
-      posterUrl: posterUrlOf(movieDetail),
+      posterUrl: info?.posterUrl ?? NO_POSTER,
+      sourceUrl: info?.sourceUrl ?? null,
+      platforms: info?.platforms ?? [],
+      genres: info?.genres ?? [],
+      earlyAccessYear: info?.earlyAccessYear ?? null,
+      categories: categories.get(tmdbId) ?? [],
       stars: stars.map((s) => {
         const user = users.find((u) => u.userId === s.userId);
         return {
           username: user?.username || 'Unknown',
-          score: s.score,
+          score: Number(s.score),
+          scores: Object.fromEntries(
+            (s.scores ?? []).map((row) => [row.categoryKey, Number(row.score)]),
+          ),
           createdAt: s.createdAt,
         };
       }),
     };
   }
 
-  async submitStar(submitStarDto: SubmitStarDto) {
-    const currentMovie = await this.currentMovieService.getCurrentMovie(
-      submitStarDto.channelId,
+  // !star: una sola nota por usuario mientras la votación esté abierta
+  async submitStar(
+    channel: Channel,
+    voter: ChatVoter,
+    args: string[],
+  ): Promise<SubmitStarResponse> {
+    const { session, info } = await this.ratingSessionService.requireOpen(
+      channel.channelId,
     );
+    const categories: ScoreCategory[] = session.categories;
 
-    let user = await this.userService.getUserById(submitStarDto.userId);
-    if (!user) {
-      user = await this.userService.createUser({
-        userId: submitStarDto.userId,
-        username: submitStarDto.username,
-      });
-    } else {
-      if (user.username !== submitStarDto.username) {
-        user.username = submitStarDto.username;
-        await user.save();
-      }
-    }
-
-    const today = new Date();
-
-    const existingStar = await this.starModel.findOne({
-      where: {
-        userId: user.userId,
-        tmdbId: currentMovie.tmdbId,
-        channelId: submitStarDto.channelId,
-        createdAt: {
-          [Op.gte]: new Date(
-            today.getFullYear(),
-            today.getMonth(),
-            today.getDate(),
-          ),
-        },
-      },
-    });
-
-    if (existingStar) {
+    const parsed = parseScores(args, categories);
+    if (!parsed.ok) {
       throw new BadRequestException(
-        `${submitStarDto.username} ya ha dado ${existingStar.score} estrellas a "${currentMovie.title} (${currentMovie.releaseYear})" hoy. Solo se permite una valoración por película al día.`,
+        `Disculpa ${voter.username}, ${parsed.error}`,
       );
     }
 
-    await this.createStar({
-      userId: user.userId,
-      tmdbId: currentMovie.tmdbId,
-      channelId: submitStarDto.channelId,
-      mediaType: 'movie',
-      score: submitStarDto.stars,
-    });
-    // La película puntuada queda en el índice de búsqueda (Movies)
-    this.movieService.syncMetadataInBackground([currentMovie.tmdbId]);
+    const user = await this.userService.findOrCreate(
+      voter.userId,
+      voter.username,
+    );
 
-    const fullStars = Math.floor(submitStarDto.stars);
-    const hasHalfStar = submitStarDto.stars % 1 !== 0;
+    const existingStar = await this.starModel.findOne({
+      where: { ...sessionStarsWhere(session), userId: user.userId },
+    });
+    if (existingStar) {
+      throw new BadRequestException(
+        `${voter.username} ya ha dado ${Number(existingStar.score)} estrellas a ${mediaLabel(info)}. Solo se permite una valoración por votación; si te equivocaste, usa !apelar.`,
+      );
+    }
+
+    const { score, scores } = parsed.value;
+    await this.sequelize.transaction(async (transaction) => {
+      const star = await this.starModel.create(
+        {
+          userId: user.userId,
+          tmdbId: info.id,
+          channelId: channel.channelId,
+          mediaType: info.mediaType,
+          score,
+          sessionId: session.id,
+        },
+        { transaction },
+      );
+      await this.starScoreModel.bulkCreate(
+        Object.entries(scores).map(([categoryKey, value]) => ({
+          starId: Number(star.id),
+          categoryKey,
+          score: value,
+        })),
+        { transaction },
+      );
+    });
+    // El contenido puntuado queda en el índice de búsqueda (Movies)
+    this.catalog.syncMetadataInBackground(info.mediaType, [info.id]);
+
+    const breakdown = formatScores(scores, categories);
+    const fullStars = Math.floor(score);
+    const hasHalfStar = score % 1 >= 0.5;
     const starsAsEmotes = `${'⭐'.repeat(fullStars)}${hasHalfStar ? '½' : ''}`;
 
     return {
-      message: `${submitStarDto.username} ha dado ${starsAsEmotes} (${submitStarDto.stars}) estrellas a "${currentMovie.title} (${currentMovie.releaseYear})"`,
-      currentMovie,
-      stars: submitStarDto.stars,
+      message: `${voter.username} ha dado ${starsAsEmotes} (${score}) estrellas a ${mediaLabel(info)}${breakdown ? ` — ${breakdown}` : ''}`,
+      stars: score,
     };
+  }
+
+  // Promedio de cada categoría por contenido, en el orden de las categorías del canal
+  private async categoryAverages(
+    channel: Channel,
+    mediaType: MediaType,
+    tmdbIds: number[],
+  ): Promise<Map<number, CategoryAverage[]>> {
+    const result = new Map<number, CategoryAverage[]>();
+    if (!tmdbIds.length) return result;
+
+    const rows = await this.sequelize.query<{
+      tmdbId: number;
+      categoryKey: string;
+      average: number;
+    }>(
+      `SELECT s."tmdbId", ss."categoryKey",
+              ROUND(AVG(ss."score")::numeric, 1)::float AS "average"
+         FROM "Stars" s
+         JOIN "StarScores" ss ON ss."starId" = s."id"
+        WHERE s."channelId" = :channelId AND s."mediaType" = :mediaType
+          AND s."tmdbId" IN (:tmdbIds)
+        GROUP BY s."tmdbId", ss."categoryKey"`,
+      {
+        replacements: { channelId: channel.channelId, mediaType, tmdbIds },
+        type: QueryTypes.SELECT,
+      },
+    );
+    if (!rows.length) return result;
+
+    const known = categoryLabels(channel, mediaType);
+    const order = new Map(
+      known.map((category, index) => [category.key, index]),
+    );
+    for (const row of rows) {
+      const tmdbId = Number(row.tmdbId);
+      const list = result.get(tmdbId) ?? [];
+      list.push({
+        key: row.categoryKey,
+        label:
+          known.find((c) => c.key === row.categoryKey)?.label ??
+          row.categoryKey,
+        average: Number(row.average),
+      });
+      result.set(tmdbId, list);
+    }
+    for (const list of result.values()) {
+      list.sort(
+        (a, b) =>
+          (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity),
+      );
+    }
+    return result;
   }
 }

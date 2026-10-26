@@ -83,6 +83,26 @@ export class TmdbService {
     }
   }
 
+  // Búsqueda para elegir la película a puntuar (títulos en español, por relevancia)
+  async searchMovies(query: string, year?: number): Promise<Movie[]> {
+    try {
+      const response = await this.httpService.axiosRef.get<{
+        results: Movie[];
+      }>(`https://api.themoviedb.org/3/search/movie`, {
+        headers: {
+          Authorization: `Bearer ${process.env.TMDB_TOKEN}`,
+        },
+        params: { query, year, language: 'es-MX' },
+      });
+      return response.data.results;
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to search movies with query "${query}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      return [];
+    }
+  }
+
   async addMovieToList(
     tmdbId: number,
     listId: number,

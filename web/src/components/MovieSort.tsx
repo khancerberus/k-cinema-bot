@@ -4,6 +4,7 @@ import {
   type MovieSortValue,
   type SortDirection,
 } from "../lib/movie-query";
+import type { MediaType, RatingCategory } from "../types/channel.type";
 
 const sortOptions: Array<{ key: MovieSortKey; label: string; defaultDirection: SortDirection }> = [
   { key: "title", label: "Título", defaultDirection: "asc" },
@@ -15,9 +16,22 @@ const sortOptions: Array<{ key: MovieSortKey; label: string; defaultDirection: S
 interface MovieSortProps {
   sort: MovieSortValue;
   onChange: (sort: MovieSortValue) => void;
+  // Categorías por las que también se puede ordenar (juegos)
+  categories?: RatingCategory[];
+  mediaType?: MediaType;
 }
 
-export const MovieSort = ({ sort, onChange }: MovieSortProps) => {
+export const MovieSort = ({ sort, onChange, categories = [], mediaType = "movie" }: MovieSortProps) => {
+  const options = [
+    ...sortOptions.map((option) =>
+      option.key === "year" && mediaType === "game" ? { ...option, label: "Año del juego" } : option,
+    ),
+    ...categories.map((category) => ({
+      key: `cat:${category.key}` as MovieSortKey,
+      label: category.label,
+      defaultDirection: "desc" as SortDirection,
+    })),
+  ];
   // Al pulsar el criterio activo se invierte la dirección; uno nuevo empieza con su dirección por defecto
   const selectSort = (key: MovieSortKey, defaultDirection: SortDirection) => {
     if (sort.key === key) {
@@ -43,7 +57,7 @@ export const MovieSort = ({ sort, onChange }: MovieSortProps) => {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {sortOptions.map(({ key, label, defaultDirection }) => {
+        {options.map(({ key, label, defaultDirection }) => {
           const isActive = sort.key === key;
 
           return (
