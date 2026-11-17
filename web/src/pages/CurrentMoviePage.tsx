@@ -172,6 +172,29 @@ export const CurrentMoviePage = () => {
       body: JSON.stringify({ minutes: extra }),
     });
 
+  // Widget de OBS: URL pública del canal y voto de prueba
+  const overlayUrl = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/${channel.channelUsername}/overlay`;
+
+  const copyOverlayUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(overlayUrl);
+      toast.success("URL copiada");
+    } catch {
+      toast.error("No se pudo copiar la URL.");
+    }
+  };
+
+  const testOverlay = async () => {
+    try {
+      const response = await apiFetch(`${channelPath(channel.channelUsername)}/overlay/test`, { method: "POST" });
+      if (response.ok) toast.success("Voto de prueba enviado al widget");
+      else toast.error(await readApiError(response));
+    } catch (error) {
+      console.error("Error:", error);
+      toast.error("No se pudo enviar el voto de prueba.");
+    }
+  };
+
   const validMinutes =
     Number.isInteger(minutes) && minutes >= MIN_VOTING_MINUTES && minutes <= MAX_VOTING_MINUTES;
   const typedId = /^\d+$/.test(query.trim()) ? Number(query.trim()) : null;
@@ -323,6 +346,24 @@ export const CurrentMoviePage = () => {
             <li className="text-stone-500">Sin resultados.</li>
           )}
         </ul>
+      </section>
+
+      <section className="w-full flex flex-col gap-3 outline-2 outline-[#ffa300] rounded-xl p-4 bg-[#ffa300]/5">
+        <h2 className="text-2xl font-bold text-[#ffa300]">Widget OBS</h2>
+        <p className="text-sm text-gray-400">
+          Añade una «Fuente de navegador» en OBS con esta URL (1920×1080). Muestra una alerta cada vez que alguien
+          puntúa con !star. Opcional: <code>?position=bottom-right</code> (también top-left, top-right) y{" "}
+          <code>?duration=8</code> (segundos).
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input className={inputClassName} value={overlayUrl} readOnly aria-label="URL del widget de OBS" onFocus={(event) => event.target.select()} />
+          <button className={secondaryButtonClassName} onClick={copyOverlayUrl}>
+            Copiar
+          </button>
+          <button className={buttonClassName} onClick={testOverlay}>
+            Probar
+          </button>
+        </div>
       </section>
     </div>
   );
