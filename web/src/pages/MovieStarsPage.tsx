@@ -140,7 +140,7 @@ export const MovieStarsPage = () => {
             <p className="text-md font-bold">Rating Promedio</p>
             <span className="text-4xl text-[#ffa300]">{movieDetails.rating}★</span>
             <span className="text-xs text-stone-500">
-              {movieDetails.stars.length} {movieDetails.stars.length === 1 ? "voto" : "votos"}
+              {movieDetails.stars.length} {movieDetails.stars.length === 1 ? "nota" : "notas"}
             </span>
           </div>
         </div>
@@ -150,7 +150,7 @@ export const MovieStarsPage = () => {
         <section className="flex flex-col md:flex-row items-center gap-8 w-full outline-2 outline-[#cf0060] rounded-xl p-4 bg-[#cf0060]/10">
           <div className="flex flex-col gap-1 self-stretch md:w-64">
             <h3 className="text-2xl font-bold text-cyan-300">Por categoría</h3>
-            <p className="text-xs text-stone-500 mb-2">Promedio de todos los votos, sobre 5</p>
+            <p className="text-xs text-stone-500 mb-2">Promedio de todas las notas, sobre 5</p>
             <CategoryBars categories={movieDetails.categories} />
           </div>
           <div className="flex flex-1 justify-center">

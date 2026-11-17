@@ -35,7 +35,7 @@ export const NavBar = ({ channel, isOwner }: NavBarProps) => {
         </Link>
         {isOwner && (
           <Link to={`${base}/current-movie`} className="text-white hover:text-[#ffa300]">
-            Votación
+            Puntuación
           </Link>
         )}
       </div>
