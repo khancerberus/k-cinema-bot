@@ -13,6 +13,8 @@ import { AppealService } from './appeal.service';
 import { CurrentMovieController } from './current-movie.controller';
 import { ChannelModule } from '@/channel/channel.module';
 import { MovieModule } from '@/movie/movie.module';
+import { StarEventsService } from './star-events.service';
+import { OverlayController } from './overlay.controller';
 
 @Module({
   imports: [
@@ -27,8 +29,18 @@ import { MovieModule } from '@/movie/movie.module';
     ChannelModule,
     MovieModule,
   ],
-  controllers: [StarController, GameController, CurrentMovieController],
-  providers: [StarService, RatingSessionService, AppealService],
+  controllers: [
+    StarController,
+    GameController,
+    CurrentMovieController,
+    OverlayController,
+  ],
+  providers: [
+    StarService,
+    RatingSessionService,
+    AppealService,
+    StarEventsService,
+  ],
   exports: [SequelizeModule, StarService, RatingSessionService, AppealService],
 })
 export class StarModule {}

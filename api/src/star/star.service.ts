@@ -19,6 +19,7 @@ import {
   sessionStarsWhere,
 } from './rating-session.service';
 import { formatScores, parseScores, type ScoreCategory } from './star-input';
+import { StarEventsService } from './star-events.service';
 
 export interface CategoryAverage {
   key: string;
@@ -121,6 +122,7 @@ export class StarService {
     private readonly ratingSessionService: RatingSessionService,
     private readonly userService: UserService,
     private readonly catalog: CatalogService,
+    private readonly starEvents: StarEventsService,
   ) {}
 
   async getStarsByItem(
@@ -401,6 +403,18 @@ export class StarService {
     });
     // El contenido puntuado queda en el índice de búsqueda (Movies)
     this.catalog.syncMetadataInBackground(info.mediaType, [info.id]);
+    // Widget de OBS
+    this.starEvents.emit({
+      channelId: channel.channelId,
+      username: voter.username,
+      mediaType: info.mediaType,
+      title: info.title,
+      year: info.year,
+      posterUrl: info.posterUrl,
+      score,
+      scores,
+      categories,
+    });
 
     const breakdown = formatScores(scores, categories);
     const fullStars = Math.floor(score);

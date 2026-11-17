@@ -8,6 +8,7 @@ import { CurrentMoviePage } from "./pages/CurrentMoviePage"
 import { HomePage } from "./pages/HomePage"
 import { LoginPage } from "./pages/LoginPage"
 import { ChannelNotFoundPage } from "./pages/ChannelNotFoundPage"
+import { OverlayError, OverlayPage } from "./pages/OverlayPage"
 import { apiFetch, channelPath } from "./lib/api";
 import { MEDIA_PATHS, type MediaType } from "./types/channel.type";
 
@@ -24,7 +25,26 @@ const itemLoader =
     return response.json();
   };
 
+// Perfil público del canal de la URL
+const channelLoader = async ({ params }: { params: Record<string, string | undefined> }) => {
+  const response = await apiFetch(channelPath(params.channel ?? ""));
+  if (response.status === 404) {
+    throw new Response("Channel not found", { status: 404 });
+  }
+  if (!response.ok) {
+    throw new Error("Failed to fetch channel");
+  }
+  return response.json();
+};
+
 const router = createBrowserRouter([
+  {
+    // Fuente de navegador de OBS: sin layout, fondo transparente
+    path: "/:channel/overlay",
+    loader: channelLoader,
+    Component: OverlayPage,
+    ErrorBoundary: OverlayError,
+  },
   {
     path: "/",
     Component: MainLayout,
@@ -35,16 +55,7 @@ const router = createBrowserRouter([
       },
       {
         path: ":channel",
-        loader: async ({ params }) => {
-          const response = await apiFetch(channelPath(params.channel ?? ""));
-          if (response.status === 404) {
-            throw new Response("Channel not found", { status: 404 });
-          }
-          if (!response.ok) {
-            throw new Error("Failed to fetch channel");
-          }
-          return response.json();
-        },
+        loader: channelLoader,
         Component: ChannelLayout,
         ErrorBoundary: ChannelNotFoundPage,
         children: [
