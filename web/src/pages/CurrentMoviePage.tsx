@@ -120,7 +120,7 @@ export const CurrentMoviePage = () => {
   if (!isOwner) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-4 py-10 text-center">
-        <h1 className="text-8xl font-bold font-bebaskai">Votación</h1>
+        <h1 className="text-8xl font-bold font-bebaskai">Puntuación</h1>
         <p className="text-xl text-gray-300">
           Solo el streamer de {channel.displayName} puede ver esta página.
         </p>
@@ -184,14 +184,17 @@ export const CurrentMoviePage = () => {
     }
   };
 
-  const testOverlay = async () => {
+  // kind: "star" (tarjeta de voto) o "session-open" (banner de votación abierta)
+  const testOverlay = async (kind: "star" | "session-open") => {
     try {
-      const response = await apiFetch(`${channelPath(channel.channelUsername)}/overlay/test`, { method: "POST" });
-      if (response.ok) toast.success("Voto de prueba enviado al widget");
+      const response = await apiFetch(`${channelPath(channel.channelUsername)}/overlay/test?kind=${kind}`, {
+        method: "POST",
+      });
+      if (response.ok) toast.success(kind === "star" ? "Nota de prueba enviada al widget" : "Banner de prueba enviado al widget");
       else toast.error(await readApiError(response));
     } catch (error) {
       console.error("Error:", error);
-      toast.error("No se pudo enviar el voto de prueba.");
+      toast.error("No se pudo enviar la prueba al widget.");
     }
   };
 
@@ -203,12 +206,12 @@ export const CurrentMoviePage = () => {
 
   return (
     <div className="flex flex-col items-center gap-8 px-4 py-6 w-full max-w-3xl mx-auto">
-      <h1 className="text-8xl font-bold font-bebaskai">Votación</h1>
+      <h1 className="text-8xl font-bold font-bebaskai">Puntuación</h1>
 
       <section className="w-full flex flex-col gap-4 outline-2 outline-[#00fff9] rounded-xl p-4 bg-[#00fff9]/5">
-        <h2 className="text-2xl font-bold text-[#00fff9]">Votación abierta</h2>
+        <h2 className="text-2xl font-bold text-[#00fff9]">Ronda de puntuación abierta</h2>
         {!current ? (
-          <p className="text-gray-400">No hay ninguna votación abierta. Elige qué puntuar abajo.</p>
+          <p className="text-gray-400">No hay ninguna ronda de puntuación abierta. Elige qué puntuar abajo.</p>
         ) : (
           <div className="flex flex-col sm:flex-row gap-4">
             <MoviePoster
@@ -223,7 +226,7 @@ export const CurrentMoviePage = () => {
                 {current.title} ({current.releaseYear})
               </p>
               <p className="text-gray-300">
-                {current.votes} {current.votes === 1 ? "voto" : "votos"}
+                {current.votes} {current.votes === 1 ? "nota" : "notas"}
                 {current.categories.length > 0 && (
                   <span className="text-gray-400"> · {current.categories.map((c) => c.label).join(", ")}</span>
                 )}
@@ -243,7 +246,7 @@ export const CurrentMoviePage = () => {
                   </>
                 )}
                 <button className={buttonClassName} onClick={close} disabled={busy}>
-                  Cerrar votación
+                  Cerrar ronda
                 </button>
               </div>
             </div>
@@ -252,9 +255,9 @@ export const CurrentMoviePage = () => {
       </section>
 
       <section className="w-full flex flex-col gap-4 outline-2 outline-[#cf0060] rounded-xl p-4 bg-[#cf0060]/10">
-        <h2 className="text-2xl font-bold text-[#ff2a4b]">Abrir votación</h2>
+        <h2 className="text-2xl font-bold text-[#ff2a4b]">Abrir ronda de puntuación</h2>
         {current && (
-          <p className="text-sm text-stone-400">Abrir otra votación cierra la actual sin anunciar el resumen.</p>
+          <p className="text-sm text-stone-400">Abrir otra ronda cierra la actual sin anunciar el resumen.</p>
         )}
 
         <div className="flex gap-2" role="tablist" aria-label="Tipo de contenido">
@@ -352,16 +355,20 @@ export const CurrentMoviePage = () => {
         <h2 className="text-2xl font-bold text-[#ffa300]">Widget OBS</h2>
         <p className="text-sm text-gray-400">
           Añade una «Fuente de navegador» en OBS con esta URL (1920×1080). Muestra una alerta cada vez que alguien
-          puntúa con !star. Opcional: <code>?position=bottom-right</code> (también top-left, top-right) y{" "}
-          <code>?duration=8</code> (segundos).
+          puntúa con !star, y un banner arriba al centro cuando se abre una ronda de puntuación (por comando o desde aquí).
+          Opcional: <code>?position=bottom-right</code> (también top-left, top-right), <code>?duration=8</code>{" "}
+          (segundos de cada nota) y <code>?banner=10</code> (segundos del banner).
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input className={inputClassName} value={overlayUrl} readOnly aria-label="URL del widget de OBS" onFocus={(event) => event.target.select()} />
           <button className={secondaryButtonClassName} onClick={copyOverlayUrl}>
             Copiar
           </button>
-          <button className={buttonClassName} onClick={testOverlay}>
-            Probar
+          <button className={`${buttonClassName} shrink-0`} onClick={() => testOverlay("star")}>
+            Probar nota
+          </button>
+          <button className={`${buttonClassName} shrink-0`} onClick={() => testOverlay("session-open")}>
+            Probar banner
           </button>
         </div>
       </section>

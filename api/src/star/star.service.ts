@@ -375,7 +375,7 @@ export class StarService {
     });
     if (existingStar) {
       throw new BadRequestException(
-        `${voter.username} ya ha dado ${Number(existingStar.score)} estrellas a ${mediaLabel(info)}. Solo se permite una valoración por votación; si te equivocaste, usa !apelar.`,
+        `${voter.username} ya ha dado ${Number(existingStar.score)} estrellas a ${mediaLabel(info)}. Solo se permite una nota por ronda de puntuación; si te equivocaste, usa !apelar.`,
       );
     }
 
@@ -405,6 +405,7 @@ export class StarService {
     this.catalog.syncMetadataInBackground(info.mediaType, [info.id]);
     // Widget de OBS
     this.starEvents.emit({
+      kind: 'star',
       channelId: channel.channelId,
       username: voter.username,
       mediaType: info.mediaType,

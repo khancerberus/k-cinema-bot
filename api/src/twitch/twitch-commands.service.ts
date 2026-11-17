@@ -229,7 +229,7 @@ export class TwitchCommandsService implements OnModuleInit {
         await this.reply(
           channel,
           () => this.ratingSessionService.extend(channel, command.minutes),
-          `Disculpa ${displayName}, no se pudo alargar la votación.`,
+          `Disculpa ${displayName}, no se pudo alargar la ronda de puntuación.`,
         );
         return;
 

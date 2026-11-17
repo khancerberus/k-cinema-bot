@@ -108,8 +108,8 @@ export const RatingSettingsEditor = ({ settings, onChange }: RatingSettingsEdito
                 disabled={category.archived && activeCount >= MAX_CATEGORIES}
                 title={
                   category.archived
-                    ? "Volver a usarla en las próximas votaciones"
-                    : "Deja de pedirse en las próximas votaciones; los votos antiguos la conservan"
+                    ? "Volver a usarla en las próximas rondas de puntuación"
+                    : "Deja de pedirse en las próximas rondas de puntuación; las notas antiguas la conservan"
                 }
               >
                 {category.archived ? "Restaurar" : "Archivar"}
@@ -132,7 +132,7 @@ export const RatingSettingsEditor = ({ settings, onChange }: RatingSettingsEdito
 
   return (
     <div className="flex flex-col gap-4">
-      <h3 className="text-lg font-bold text-[#00fff9]">Votaciones</h3>
+      <h3 className="text-lg font-bold text-[#00fff9]">Rondas de puntuación</h3>
 
       <div className="flex flex-wrap items-end gap-6">
         <label className="flex flex-col gap-1">
@@ -156,8 +156,8 @@ export const RatingSettingsEditor = ({ settings, onChange }: RatingSettingsEdito
         </label>
       </div>
       <p className="text-xs text-stone-500">
-        La votación se abre con !k movie|game &lt;nombre&gt; [minutos, p. ej. 15m] y se cierra sola al terminar
-        ({MIN_VOTING_MINUTES} a {MAX_VOTING_MINUTES} minutos). Con !apelar, quien se equivocó pide corregir su voto
+        La ronda de puntuación se abre con !k movie|game &lt;nombre&gt; [minutos, p. ej. 15m] y se cierra sola al terminar
+        ({MIN_VOTING_MINUTES} a {MAX_VOTING_MINUTES} minutos). Con !apelar, quien se equivocó pide corregir su nota
         y tú o tus mods lo aprueban con !k aprobar @usuario.
       </p>
 
@@ -166,7 +166,7 @@ export const RatingSettingsEditor = ({ settings, onChange }: RatingSettingsEdito
         <p className="text-xs text-stone-500">
           En el chat: !star 4 da la misma nota a todo; !star {order.map(() => "4").join(" ")} da una nota por
           categoría en este orden: {order.map((c) => c.label).join(", ")}. Los cambios se aplican desde la próxima
-          votación.
+          ronda de puntuación.
         </p>
       )}
     </div>

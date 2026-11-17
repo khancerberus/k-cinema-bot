@@ -3,10 +3,13 @@ import { useLoaderData, useSearchParams } from "react-router";
 import { API_URL, channelPath } from "../lib/api";
 import type { ChannelProfile } from "../types/channel.type";
 import { StarAlertCard, type OverlayStar } from "../components/StarAlertCard";
+import { VotingBanner, type OverlaySessionOpen } from "../components/VotingBanner";
 
 // Página para la fuente de navegador de OBS: /:channel/overlay
-// Opcional: ?duration=6 (segundos) y ?position=bottom-left|bottom-right|top-left|top-right
+// Opcional: ?duration=6 (segundos de cada voto), ?position=bottom-left|bottom-right|top-left|top-right
+// y ?banner=10 (segundos del banner de votación abierta, arriba al centro)
 const DEFAULT_DURATION_S = 6;
+const DEFAULT_BANNER_S = 10;
 const EXIT_MS = 500;
 // Si llegan muchos votos de golpe, no se acumulan sin fin
 const MAX_QUEUE = 20;
@@ -22,15 +25,18 @@ type Position = keyof typeof POSITIONS;
 
 let nextId = 0;
 
+// Segundos de la URL dentro de un rango, o el valor por defecto (en ms)
+const secondsParam = (value: string | null, fallback: number) => {
+  const seconds = Number(value);
+  return (value !== null && Number.isFinite(seconds) && seconds >= 2 && seconds <= 60 ? seconds : fallback) * 1000;
+};
+
 export const OverlayPage = () => {
   const channel = useLoaderData() as ChannelProfile;
   const [searchParams] = useSearchParams();
 
-  const durationParam = Number(searchParams.get("duration"));
-  const durationMs =
-    (Number.isFinite(durationParam) && durationParam >= 2 && durationParam <= 30
-      ? durationParam
-      : DEFAULT_DURATION_S) * 1000;
+  const durationMs = secondsParam(searchParams.get("duration"), DEFAULT_DURATION_S);
+  const bannerMs = secondsParam(searchParams.get("banner"), DEFAULT_BANNER_S);
   const positionParam = searchParams.get("position") ?? "";
   const position: Position = positionParam in POSITIONS ? (positionParam as Position) : "bottom-left";
   const accent = /^#[0-9a-f]{3,8}$/i.test(channel.accentColor) ? channel.accentColor : DEFAULT_ACCENT;
@@ -38,6 +44,9 @@ export const OverlayPage = () => {
   const [queue, setQueue] = useState<Array<OverlayStar & { id: number }>>([]);
   const [leavingId, setLeavingId] = useState<number | null>(null);
   const current = queue[0];
+  // Solo el banner de la última votación abierta
+  const [banner, setBanner] = useState<(OverlaySessionOpen & { id: number }) | null>(null);
+  const [bannerLeavingId, setBannerLeavingId] = useState<number | null>(null);
 
   // OBS: fondo transparente en vez del de la web
   useEffect(() => {
@@ -58,9 +67,19 @@ export const OverlayPage = () => {
         console.error("Evento no válido:", error);
       }
     };
+    const onSessionOpen = (event: MessageEvent<string>) => {
+      try {
+        const session = JSON.parse(event.data) as OverlaySessionOpen;
+        setBanner({ ...session, id: nextId++ });
+      } catch (error) {
+        console.error("Evento no válido:", error);
+      }
+    };
     source.addEventListener("star", onStar);
+    source.addEventListener("session-open", onSessionOpen);
     return () => {
       source.removeEventListener("star", onStar);
+      source.removeEventListener("session-open", onSessionOpen);
       source.close();
     };
   }, [channel.channelUsername]);
@@ -77,18 +96,37 @@ export const OverlayPage = () => {
     };
   }, [currentId, durationMs]);
 
-  if (!current) return null;
+  // Banner: se muestra y sale; una votación nueva lo reemplaza y reinicia el tiempo
+  const bannerId = banner?.id;
+  useEffect(() => {
+    if (bannerId === undefined) return;
+    const leave = setTimeout(() => setBannerLeavingId(bannerId), bannerMs);
+    const hide = setTimeout(() => setBanner((item) => (item?.id === bannerId ? null : item)), bannerMs + EXIT_MS);
+    return () => {
+      clearTimeout(leave);
+      clearTimeout(hide);
+    };
+  }, [bannerId, bannerMs]);
 
   return (
-    <div className={`fixed ${POSITIONS[position]}`}>
-      <StarAlertCard
-        key={current.id}
-        star={current}
-        accent={accent}
-        direction={position.endsWith("right") ? 1 : -1}
-        leaving={leavingId === current.id}
-      />
-    </div>
+    <>
+      {banner && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2">
+          <VotingBanner key={banner.id} session={banner} accent={accent} leaving={bannerLeavingId === banner.id} />
+        </div>
+      )}
+      {current && (
+        <div className={`fixed ${POSITIONS[position]}`}>
+          <StarAlertCard
+            key={current.id}
+            star={current}
+            accent={accent}
+            direction={position.endsWith("right") ? 1 : -1}
+            leaving={leavingId === current.id}
+          />
+        </div>
+      )}
+    </>
   );
 };
 
