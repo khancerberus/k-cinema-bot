@@ -277,7 +277,7 @@ export class ChannelService {
       minutes > MAX_VOTING_MINUTES
     ) {
       throw new BadRequestException(
-        `La duración de la votación debe estar entre ${MIN_VOTING_MINUTES} y ${MAX_VOTING_MINUTES} minutos.`,
+        `La duración de la ronda de puntuación debe estar entre ${MIN_VOTING_MINUTES} y ${MAX_VOTING_MINUTES} minutos.`,
       );
     }
     return minutes;

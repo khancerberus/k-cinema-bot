@@ -89,7 +89,7 @@ export class AppealService {
     });
 
     const breakdown = formatScores(parsed.value.scores, session.categories);
-    return `📝 ${voter.username} pide cambiar su voto de ${Number(star.score)}★ a ${parsed.value.score}★${breakdown ? ` (${breakdown})` : ''}${reason ? `: "${reason.slice(0, MAX_REASON_LENGTH)}"` : ''}. Un mod puede usar !k aprobar @${voter.username} o !k rechazar @${voter.username}.`;
+    return `📝 ${voter.username} pide cambiar su nota de ${Number(star.score)}★ a ${parsed.value.score}★${breakdown ? ` (${breakdown})` : ''}${reason ? `: "${reason.slice(0, MAX_REASON_LENGTH)}"` : ''}. Un mod puede usar !k aprobar @${voter.username} o !k rechazar @${voter.username}.`;
   }
 
   // Aprobar sobrescribe el voto con lo pedido; la apelación queda como registro
@@ -118,7 +118,7 @@ export class AppealService {
 
     const star = await this.starModel.findByPk(appeal.starId);
     if (!star) {
-      throw new NotFoundException('El voto de esa apelación ya no existe.');
+      throw new NotFoundException('La nota de esa apelación ya no existe.');
     }
 
     const resolvedAt = new Date();
@@ -128,7 +128,7 @@ export class AppealService {
         resolvedBy: moderator,
         resolvedAt,
       });
-      return `❌ Apelación de ${user.username} rechazada: su voto se queda en ${Number(star.score)}★.`;
+      return `❌ Apelación de ${user.username} rechazada: su nota se queda en ${Number(star.score)}★.`;
     }
 
     await this.sequelize.transaction(async (transaction) => {

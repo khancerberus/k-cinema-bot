@@ -28,6 +28,7 @@ import {
   type MediaInfo,
 } from '@/movie/catalog.service';
 import { roundScore, scoreFormatHint } from './star-input';
+import { StarEventsService } from './star-events.service';
 
 export interface MovieActionResult {
   // Texto para la web, o para responder en el chat si no se publicó el aviso
@@ -111,6 +112,7 @@ export class RatingSessionService
     private readonly catalog: CatalogService,
     private readonly twitchChat: TwitchChatService,
     private readonly channelService: ChannelService,
+    private readonly starEvents: StarEventsService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -146,7 +148,7 @@ export class RatingSessionService
       minutes > MAX_VOTING_MINUTES
     ) {
       throw new BadRequestException(
-        `La votación debe durar entre ${MIN_VOTING_MINUTES} y ${MAX_VOTING_MINUTES} minutos.`,
+        `La ronda de puntuación debe durar entre ${MIN_VOTING_MINUTES} y ${MAX_VOTING_MINUTES} minutos.`,
       );
     }
 
@@ -174,9 +176,20 @@ export class RatingSessionService
     });
 
     this.catalog.syncMetadataInBackground(info.mediaType, [info.id]);
+    // Banner del widget de OBS
+    this.starEvents.emit({
+      kind: 'session-open',
+      channelId: channel.channelId,
+      mediaType: info.mediaType,
+      title: info.title,
+      year: info.year,
+      posterUrl: info.posterUrl,
+      minutes,
+      categories,
+    });
 
     const status = previous ? 'actualizado' : 'establecido';
-    const message = `Se ha ${status} ${MEDIA_NAME[info.mediaType]} ${mediaLabel(info)} (ID ${info.id}). Votación abierta ${minutes} minutos.`;
+    const message = `Se ha ${status} ${MEDIA_NAME[info.mediaType]} ${mediaLabel(info)} (ID ${info.id}). Ronda de puntuación abierta ${minutes} minutos.`;
     if (!options.announce) return { message, announced: false };
 
     const chatMessage = `${MEDIA_EMOJI[info.mediaType]} ¡Ya se puede puntuar ${mediaLabel(info)}! Tienen ${minutes} minutos: usen !star con ${scoreFormatHint(categories)} ⭐`;
@@ -194,7 +207,7 @@ export class RatingSessionService
     const session = await this.getOpenSession(channelId);
     if (!session) {
       throw new NotFoundException(
-        'No hay ninguna votación abierta en este momento.',
+        'No hay ninguna ronda de puntuación abierta en este momento.',
       );
     }
     const info = await this.catalog.getInfo(session.mediaType, session.itemId);
@@ -229,7 +242,7 @@ export class RatingSessionService
   async extend(channel: Channel, minutes: number): Promise<string> {
     const session = await this.getOpenSession(channel.channelId);
     if (!session) {
-      throw new NotFoundException('No hay ninguna votación abierta.');
+      throw new NotFoundException('No hay ninguna ronda de puntuación abierta.');
     }
     const base = Math.max(
       Date.now(),
@@ -241,12 +254,12 @@ export class RatingSessionService
       MAX_VOTING_MINUTES * 60_000
     ) {
       throw new BadRequestException(
-        `Una votación no puede durar más de ${MAX_VOTING_MINUTES} minutos.`,
+        `Una ronda de puntuación no puede durar más de ${MAX_VOTING_MINUTES} minutos.`,
       );
     }
     await session.update({ closesAt });
     const remaining = Math.round((closesAt.getTime() - Date.now()) / 60_000);
-    return `⏱️ Votación alargada: quedan ${remaining} minutos para usar !star.`;
+    return `⏱️ Ronda de puntuación alargada: quedan ${remaining} minutos para usar !star.`;
   }
 
   // Cierra la votación y resume los votos (global y por categoría)
@@ -254,7 +267,7 @@ export class RatingSessionService
     const session = await this.getOpenSession(channel.channelId);
     if (!session) {
       return {
-        message: 'No hay ninguna votación abierta en este momento.',
+        message: 'No hay ninguna ronda de puntuación abierta en este momento.',
         announced: false,
       };
     }
@@ -273,7 +286,7 @@ export class RatingSessionService
       { where: { id: session.id, closedAt: null } },
     );
     if (!updated) {
-      return { message: 'La votación ya estaba cerrada.', announced: false };
+      return { message: 'La ronda de puntuación ya estaba cerrada.', announced: false };
     }
     session.closedAt = closedAt;
     await this.currentMovieModel.destroy({
@@ -283,21 +296,21 @@ export class RatingSessionService
     const info = await this.catalog.getInfo(session.mediaType, session.itemId);
     const label = info ? mediaLabel(info) : `ID ${session.itemId}`;
     const summary = await this.summarize(session);
-    const votesLabel = `${summary.votes} ${summary.votes === 1 ? 'voto' : 'votos'}`;
+    const votesLabel = `${summary.votes} ${summary.votes === 1 ? 'nota' : 'notas'}`;
     const breakdown = summary.categories.length
       ? ` — ${summary.categories.map((c) => `${c.label} ${c.average}`).join(' · ')}`
       : '';
 
     const message = summary.votes
       ? `Puntuación de ${label} cerrada: ${votesLabel}, promedio ${summary.average}★${breakdown}.`
-      : `Puntuación de ${label} cerrada sin votos.`;
+      : `Puntuación de ${label} cerrada sin notas.`;
 
     if (!announce) return { message, announced: false };
 
     const emoji = MEDIA_EMOJI[session.mediaType];
     const secondaryEmoji = MEDIA_EMOJI_SECONDARY[session.mediaType];
     const chatMessage = summary.votes
-      ? `${emoji} ¡Se cerró la puntuación de ${label}! ${votesLabel} con un promedio de ${summary.average}★${breakdown} (nota más alta: ${summary.highest}★). ¡Gracias por votar! ${secondaryEmoji} Pueden ver el ranking en la web.`
+      ? `${emoji} ¡Se cerró la puntuación de ${label}! ${votesLabel} con un promedio de ${summary.average}★${breakdown} (nota más alta: ${summary.highest}★). ¡Gracias por puntuar! ${secondaryEmoji} Pueden ver el ranking en la web.`
       : `${emoji} Se cerró la puntuación de ${label}, pero nadie votó 😢 ¡A la próxima!`;
 
     return this.announce(channel.channelUsername, chatMessage, message);
