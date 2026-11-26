@@ -24,9 +24,9 @@ export const NavBar = ({ channel, isOwner }: NavBarProps) => {
       </h1>
 
       <div className="flex flex-wrap gap-4">
-        <a href="#" className="text-white hover:text-[#ffa300]">
+        <Link to={`${base}/recommendations`} className="text-white hover:text-[#ffa300]">
           Recomendaciones
-        </a>
+        </Link>
         <Link to={`${base}/rated-movies`} className="text-white hover:text-[#ffa300]">
           Rated Movies
         </Link>

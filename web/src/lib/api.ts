@@ -2,6 +2,7 @@ import type { FilmMetadataProps } from "../components/MovieRatingCard";
 import { clearSession, getSession } from "./session";
 import type { MovieSortKey, SortDirection } from "./movie-query";
 import { MEDIA_PATHS, type MediaType } from "../types/channel.type";
+import type { RecommendationItem } from "../types/recommendation.type";
 
 export const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -85,4 +86,22 @@ export const fetchRatedMovies = async (
     throw new Error(await readApiError(response));
   }
   return (await response.json()) as MoviePage;
+};
+
+// Lista global de recomendaciones (no depende del canal)
+export const fetchRecommendations = async (signal?: AbortSignal): Promise<RecommendationItem[]> => {
+  const response = await apiFetch("/recommendation", { signal });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return (await response.json()) as RecommendationItem[];
+};
+
+// URL de Twitch para generar el token de moderación del bot (BOT_MOD_TOKEN)
+export const fetchBotTokenUrl = async (): Promise<string> => {
+  const response = await apiFetch("/auth/twitch/bot-token-url");
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return ((await response.json()) as { url: string }).url;
 };
