@@ -90,6 +90,12 @@ export class AuthController {
     }
   }
 
+  // URL de Twitch para generar BOT_MOD_TOKEN (timeouts de !rec) desde la web
+  @Get('twitch/bot-token-url')
+  botTokenUrl() {
+    return { url: this.twitchOAuth.buildBotTokenUrl() };
+  }
+
   // Perfil del canal con sesión iniciada (la web lo pide tras recibir el token)
   @Get('me')
   async me(@Req() req: Request) {

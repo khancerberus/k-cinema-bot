@@ -9,10 +9,18 @@ import { InjectModel } from '@nestjs/sequelize';
 import {
   CreateRecommendation,
   RecommendationBody,
+  RecommendationItem,
 } from './recommendation.interface';
 import { DuplicatedRecommendationException } from '@/exceptions/duplicated-rec.exception';
+import { LowRatedRecommendationException } from '@/exceptions/low-rated-rec.exception';
 import { TmdbService } from '@/tmdb/tmdb.service';
 import { extractTmdbId } from '@/utils/url-decoder.utils';
+
+// Lista de TMDB donde se guardan todas las recomendaciones
+const RECOMMENDATION_LIST_ID = 8655050;
+
+// vote_average de TMDB (0-10) igual o menor a esto (≤ 50% de aprobación) se rechaza
+const MIN_TMDB_APPROVAL = 5;
 
 @Injectable()
 export class RecommendationService {
@@ -101,6 +109,23 @@ export class RecommendationService {
       throw new BadRequestException('Could not determine TMDB ID from input');
     }
 
+    // Se consulta antes de guardar: una peli mal valorada no entra a la lista ni a la DB
+    const movie = await this.tmdbService.getMovie(tmdbId);
+
+    if (!movie) {
+      throw new BadGatewayException(
+        `@${recommendation.username}, no pude traer los datos de la película de TMDB. Inténtalo de nuevo.`,
+      );
+    }
+
+    // Sin votos no hay rating en TMDB: se acepta normal
+    if (movie.vote_count > 0 && movie.vote_average <= MIN_TMDB_APPROVAL) {
+      throw new LowRatedRecommendationException(
+        movie.title,
+        movie.vote_average,
+      );
+    }
+
     const recommendationResult = await this.createOne({
       userId: recommendation.userId,
       username: recommendation.username,
@@ -111,21 +136,51 @@ export class RecommendationService {
       throw new BadRequestException('Failed to create recommendation');
     }
 
-    const movie = await this.tmdbService.getMovie(tmdbId);
+    return `@${recommendation.username}, gracias por tu recomendación de ${movie.title} (${movie.release_date?.split('-')[0] || 'N/A'}). ¡La tendremos en cuenta para futuras proyecciones!`;
+  }
 
-    if (!movie) {
-      throw new BadRequestException(
-        'No pude traer los datos de la película recomendada, pero gracias por tu recomendación!',
+  // La lista de TMDB es la fuente; la DB solo aporta quién recomendó (puede faltar)
+  async findAll(): Promise<RecommendationItem[]> {
+    const items = await this.tmdbService.getListItems(RECOMMENDATION_LIST_ID);
+
+    if (!items) {
+      throw new BadGatewayException(
+        'No se pudo obtener la lista de recomendaciones de TMDB.',
       );
     }
 
-    return `@${recommendation.username}, gracias por tu recomendación de ${movie.title} (${movie.release_date?.split('-')[0] || 'N/A'}). ¡La tendremos en cuenta para futuras proyecciones!`;
+    const rows = items.length
+      ? await this.recommendationModel.findAll({
+          where: { tmdbId: items.map((item) => item.id) },
+          attributes: ['tmdbId', 'username', 'createdAt'],
+        })
+      : [];
+    const byTmdbId = new Map(rows.map((row) => [row.tmdbId, row]));
+
+    return items.map((item) => {
+      const row = byTmdbId.get(item.id);
+      const date = item.release_date || item.first_air_date;
+      return {
+        tmdbId: item.id,
+        mediaType: item.media_type,
+        title: item.title ?? item.name ?? 'Sin título',
+        year: date ? date.split('-')[0] : null,
+        posterUrl: item.poster_path
+          ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
+          : null,
+        recommendedBy: row?.username ?? null,
+        recommendedAt: (row?.createdAt as Date | undefined) ?? null,
+      };
+    });
   }
 
   async createOne(recommendation: CreateRecommendation) {
     const { tmdbId } = recommendation;
 
-    const addResult = await this.tmdbService.addMovieToList(tmdbId, 8655050);
+    const addResult = await this.tmdbService.addMovieToList(
+      tmdbId,
+      RECOMMENDATION_LIST_ID,
+    );
 
     if (addResult === 'already_exists') {
       throw new DuplicatedRecommendationException(recommendation.username);

@@ -22,6 +22,11 @@ import {
   type MediaType,
 } from '@/channel/channel.settings';
 import { parseItemReference, parseKCommand } from '@/star/star-input';
+import { LowRatedRecommendationException } from '@/exceptions/low-rated-rec.exception';
+import { TwitchModerationService } from './twitch-moderation.service';
+
+// Timeout para quien recomienda una peli con ≤ 50% de aprobación en TMDB
+const BAD_REC_TIMEOUT_SECONDS = 600;
 
 const K_USAGE =
   'Uso: !k movie|game <ID, URL o nombre> [15m] · !k close · !k extend 5m · !k aprobar|rechazar @usuario';
@@ -64,6 +69,7 @@ export class TwitchCommandsService implements OnModuleInit {
     private readonly catalog: CatalogService,
     private readonly channelService: ChannelService,
     private readonly config: ConfigService,
+    private readonly moderation: TwitchModerationService,
   ) {}
 
   onModuleInit() {
@@ -133,14 +139,33 @@ export class TwitchCommandsService implements OnModuleInit {
       return;
     }
 
+    const userId = tags['user-id'] ?? '';
+
     await this.reply(
       channel,
-      () =>
-        this.recommendationService.recommend({
-          userId: tags['user-id'] ?? '',
-          username: displayName,
-          movieOrTmdbId: args.join(' '),
-        }),
+      async () => {
+        try {
+          return await this.recommendationService.recommend({
+            userId,
+            username: displayName,
+            movieOrTmdbId: args.join(' '),
+          });
+        } catch (error) {
+          if (!(error instanceof LowRatedRecommendationException)) throw error;
+
+          const timedOut =
+            Boolean(userId) &&
+            (await this.moderation.timeout(
+              channel.channelId,
+              userId,
+              BAD_REC_TIMEOUT_SECONDS,
+              `!rec: ${error.message}`,
+            ));
+          return timedOut
+            ? `@${displayName} Mala tu wea, baneao`
+            : `@${displayName} Mala tu wea. Te salvaste del baneo, pero no la guardé.`;
+        }
+      },
       `Disculpa ${displayName}, hubo un error al procesar tu recomendación.`,
     );
   }
