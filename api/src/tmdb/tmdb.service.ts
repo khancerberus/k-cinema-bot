@@ -6,6 +6,22 @@ import { TvShow } from './serie.interface';
 
 export type AddMovieToListResult = 'added' | 'already_exists' | 'failed';
 
+// Ítem de una lista de TMDB: película (title/release_date) o serie (name/first_air_date)
+export interface TmdbListItem {
+  id: number;
+  media_type: 'movie' | 'tv';
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  poster_path: string | null;
+}
+
+interface TmdbListPage {
+  items: TmdbListItem[];
+  total_pages: number;
+}
+
 @Injectable()
 export class TmdbService {
   private readonly logger = new Logger(TmdbService.name);
@@ -100,6 +116,37 @@ export class TmdbService {
         `Failed to search movies with query "${query}": ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
       return [];
+    }
+  }
+
+  // Todos los ítems de una lista, recorriendo sus páginas. null si TMDB falla
+  async getListItems(listId: number): Promise<TmdbListItem[] | null> {
+    const config = {
+      headers: {
+        Authorization: `Bearer ${process.env.TMDB_TOKEN}`,
+      },
+    };
+
+    try {
+      const items: TmdbListItem[] = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const response = await this.httpService.axiosRef.get<TmdbListPage>(
+          `https://api.themoviedb.org/3/list/${listId}?language=es-MX&page=${page}`,
+          config,
+        );
+        items.push(...response.data.items);
+        totalPages = response.data.total_pages ?? 1;
+        page++;
+      } while (page <= totalPages);
+
+      return items;
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to fetch TMDB list ${listId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      return null;
     }
   }
 

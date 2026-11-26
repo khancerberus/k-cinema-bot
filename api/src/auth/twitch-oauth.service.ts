@@ -42,6 +42,20 @@ export class TwitchOAuthService {
     return `https://id.twitch.tv/oauth2/authorize?${params.toString()}`;
   }
 
+  // Implicit grant para generar BOT_MOD_TOKEN desde la web (/bot-token): Twitch devuelve el
+  // token en el fragmento y la API nunca lo ve. force_verify deja elegir la cuenta del bot.
+  buildBotTokenUrl(): string {
+    const webUrl = this.require('WEB_URL').replace(/\/+$/, '');
+    const params = new URLSearchParams({
+      client_id: this.clientId,
+      redirect_uri: `${webUrl}/bot-token`,
+      response_type: 'token',
+      scope: 'moderator:manage:banned_users',
+      force_verify: 'true',
+    });
+    return `https://id.twitch.tv/oauth2/authorize?${params.toString()}`;
+  }
+
   // Intercambia el code por un access token y devuelve el usuario verificado.
   // El token de Twitch se descarta: la sesión de K-Cinema es un JWT propio.
   async getUserFromCode(code: string): Promise<TwitchUser> {

@@ -9,6 +9,8 @@ import { HomePage } from "./pages/HomePage"
 import { LoginPage } from "./pages/LoginPage"
 import { ChannelNotFoundPage } from "./pages/ChannelNotFoundPage"
 import { OverlayError, OverlayPage } from "./pages/OverlayPage"
+import { RecommendationsPage } from "./pages/RecommendationsPage"
+import { BotTokenPage } from "./pages/BotTokenPage"
 import { apiFetch, channelPath } from "./lib/api";
 import { MEDIA_PATHS, type MediaType } from "./types/channel.type";
 
@@ -54,6 +56,11 @@ const router = createBrowserRouter([
         Component: LoginPage,
       },
       {
+        // Generador de BOT_MOD_TOKEN (Twitch vuelve aquí con #access_token)
+        path: "bot-token",
+        Component: BotTokenPage,
+      },
+      {
         path: ":channel",
         loader: channelLoader,
         Component: ChannelLayout,
@@ -62,6 +69,10 @@ const router = createBrowserRouter([
           {
             index: true,
             Component: HomePage,
+          },
+          {
+            path: "recommendations",
+            Component: RecommendationsPage,
           },
           {
             path: "rated-movies",
