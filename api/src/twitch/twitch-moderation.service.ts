@@ -1,47 +1,69 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { BOT_MOD_SCOPE } from '@/auth/twitch-oauth.service';
+
+interface BotAccess {
+  accessToken: string;
+  moderatorId: string;
+}
 
 // Moderación por la Helix API (Twitch quitó /timeout por IRC).
-// BOT_MOD_TOKEN: token de la cuenta del bot con el scope moderator:manage:banned_users,
-// emitido por la app TWITCH_CLIENT_ID. Se genera en la web, en /bot-token.
+// BOT_MOD_REFRESH_TOKEN: refresh token de la cuenta del bot con el scope
+// moderator:manage:banned_users, emitido por la app TWITCH_CLIENT_ID. Se genera en la web,
+// en /bot-token. El access token (dura ~4 h) se pide y se renueva aquí, en memoria.
 // https://dev.twitch.tv/docs/api/reference/#ban-user
 @Injectable()
 export class TwitchModerationService {
   private readonly logger = new Logger(TwitchModerationService.name);
-  // user_id de la cuenta dueña de BOT_MOD_TOKEN (va como moderator_id)
-  private moderatorId: Promise<string | null> | null = null;
+  private access: Promise<BotAccess | null> | null = null;
+  // Twitch puede devolver un refresh token nuevo al renovar: se usa el último
+  private refreshToken = process.env.BOT_MOD_REFRESH_TOKEN;
 
   // Timeout de `seconds` segundos. false si no se pudo (sin token, bot sin mod,
-  // usuario mod o broadcaster, token vencido...)
+  // usuario mod o broadcaster, autorización revocada...)
   async timeout(
     broadcasterId: string,
     userId: string,
     seconds: number,
     reason: string,
   ): Promise<boolean> {
-    const token = process.env.BOT_MOD_TOKEN;
-    const clientId = process.env.TWITCH_CLIENT_ID;
-    if (!token || !clientId) {
+    let response = await this.ban(broadcasterId, userId, seconds, reason);
+    // Access token vencido: se renueva una vez y se reintenta
+    if (response?.status === 401) {
+      this.access = null;
+      response = await this.ban(broadcasterId, userId, seconds, reason);
+    }
+    if (!response) return false;
+
+    if (!response.ok) {
       this.logger.warn(
-        'Faltan BOT_MOD_TOKEN o TWITCH_CLIENT_ID: no se puede dar timeout',
+        `Twitch rechazó el timeout de ${userId} en ${broadcasterId} (${response.status}): ${await response.text()}`,
       );
       return false;
     }
+    return true;
+  }
 
-    const moderatorId = await this.getModeratorId(token);
-    if (!moderatorId) return false;
+  private async ban(
+    broadcasterId: string,
+    userId: string,
+    seconds: number,
+    reason: string,
+  ): Promise<Response | null> {
+    const access = await this.getAccess();
+    if (!access) return null;
 
     try {
       const params = new URLSearchParams({
         broadcaster_id: broadcasterId,
-        moderator_id: moderatorId,
+        moderator_id: access.moderatorId,
       });
-      const response = await fetch(
+      return await fetch(
         `https://api.twitch.tv/helix/moderation/bans?${params.toString()}`,
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
-            'Client-Id': clientId,
+            Authorization: `Bearer ${access.accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID ?? '',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -49,52 +71,78 @@ export class TwitchModerationService {
           }),
         },
       );
-
-      if (!response.ok) {
-        // Token vencido o revocado: se vuelve a validar en el próximo intento
-        if (response.status === 401) this.moderatorId = null;
-        this.logger.warn(
-          `Twitch rechazó el timeout de ${userId} en ${broadcasterId} (${response.status}): ${await response.text()}`,
-        );
-        return false;
-      }
-      return true;
     } catch (error) {
       this.logger.error(`No se pudo dar timeout a ${userId}`, error as Error);
-      return false;
+      return null;
     }
   }
 
-  private getModeratorId(token: string) {
-    this.moderatorId ??= this.validate(token);
-    return this.moderatorId;
+  private getAccess() {
+    this.access ??= this.refresh().then((access) => {
+      // Si falló, se vuelve a intentar en el próximo timeout
+      if (!access) this.access = null;
+      return access;
+    });
+    return this.access;
   }
 
-  private async validate(token: string): Promise<string | null> {
+  private async refresh(): Promise<BotAccess | null> {
+    const clientId = process.env.TWITCH_CLIENT_ID;
+    const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+    if (!this.refreshToken || !clientId || !clientSecret) {
+      this.logger.warn(
+        'Faltan BOT_MOD_REFRESH_TOKEN, TWITCH_CLIENT_ID o TWITCH_CLIENT_SECRET: no se puede dar timeout',
+      );
+      return null;
+    }
+
     try {
-      const response = await fetch('https://id.twitch.tv/oauth2/validate', {
-        headers: { Authorization: `OAuth ${token}` },
+      const tokenResponse = await fetch('https://id.twitch.tv/oauth2/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: this.refreshToken,
+        }),
       });
-      if (!response.ok) {
+      if (!tokenResponse.ok) {
         this.logger.warn(
-          `BOT_MOD_TOKEN no es válido (${response.status}); genera otro en /bot-token`,
+          `No se pudo renovar el token del bot (${tokenResponse.status}); genera otro en /bot-token`,
         );
-        this.moderatorId = null;
         return null;
       }
-      const data = (await response.json()) as {
+      const token = (await tokenResponse.json()) as {
+        access_token: string;
+        refresh_token?: string;
+      };
+      if (token.refresh_token) this.refreshToken = token.refresh_token;
+
+      // moderator_id es la cuenta dueña del token
+      const validateResponse = await fetch(
+        'https://id.twitch.tv/oauth2/validate',
+        { headers: { Authorization: `OAuth ${token.access_token}` } },
+      );
+      if (!validateResponse.ok) {
+        this.logger.warn(
+          `Twitch no validó el token del bot (${validateResponse.status})`,
+        );
+        return null;
+      }
+      const data = (await validateResponse.json()) as {
         user_id: string;
+        login: string;
         scopes: string[];
       };
-      if (!data.scopes.includes('moderator:manage:banned_users')) {
+      if (!data.scopes.includes(BOT_MOD_SCOPE)) {
         this.logger.warn(
-          'BOT_MOD_TOKEN no tiene el scope moderator:manage:banned_users',
+          `El token del bot (${data.login}) no tiene el scope ${BOT_MOD_SCOPE}`,
         );
       }
-      return data.user_id;
+      return { accessToken: token.access_token, moderatorId: data.user_id };
     } catch (error) {
-      this.logger.error('No se pudo validar BOT_MOD_TOKEN', error as Error);
-      this.moderatorId = null;
+      this.logger.error('No se pudo renovar el token del bot', error as Error);
       return null;
     }
   }

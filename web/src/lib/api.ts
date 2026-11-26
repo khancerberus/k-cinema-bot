@@ -9,6 +9,9 @@ export const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 // La API redirige a Twitch y vuelve a la web con el token en el fragmento (#token=...)
 export const TWITCH_LOGIN_URL = `${API_URL}/auth/twitch`;
 
+// Autoriza la cuenta del bot para dar timeouts; vuelve a /bot-token con #refresh_token=...
+export const TWITCH_BOT_AUTH_URL = `${API_URL}/auth/twitch/bot`;
+
 // fetch contra la API que añade el token de sesión del streamer, si lo hay
 export const apiFetch = async (path: string, init: RequestInit = {}) => {
   const headers = new Headers(init.headers);
@@ -95,13 +98,4 @@ export const fetchRecommendations = async (signal?: AbortSignal): Promise<Recomm
     throw new Error(await readApiError(response));
   }
   return (await response.json()) as RecommendationItem[];
-};
-
-// URL de Twitch para generar el token de moderación del bot (BOT_MOD_TOKEN)
-export const fetchBotTokenUrl = async (): Promise<string> => {
-  const response = await apiFetch("/auth/twitch/bot-token-url");
-  if (!response.ok) {
-    throw new Error(await readApiError(response));
-  }
-  return ((await response.json()) as { url: string }).url;
 };
